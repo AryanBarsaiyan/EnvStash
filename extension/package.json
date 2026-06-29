@@ -1,0 +1,64 @@
+{
+  "name": "envstash",
+  "displayName": "EnvStash",
+  "description": "Secure per-project environment variable manager with runbooks — by Aryan Barsaiyan",
+  "version": "1.0.2",
+  "publisher": "AryanBarsaiyan",
+  "icon": "icon.png",
+  "author": {
+    "name": "Aryan Barsaiyan"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "envstash",
+          "title": "EnvStash",
+          "icon": "$(lock)"
+        }
+      ]
+    },
+    "views": {
+      "envstash": [
+        {
+          "type": "webview",
+          "id": "envstash.panel",
+          "name": "EnvStash",
+          "icon": "$(lock)"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "envstash.open",
+        "title": "EnvStash: Open Panel"
+      },
+      {
+        "command": "envstash.exportAll",
+        "title": "EnvStash: Export All Data"
+      },
+      {
+        "command": "envstash.importAll",
+        "title": "EnvStash: Import Data"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^18.0.0",
+    "typescript": "^5.0.0"
+  }
+}

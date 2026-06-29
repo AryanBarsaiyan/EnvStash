@@ -1,0 +1,7 @@
+.vscode/**
+src/**
+tsconfig.json
+.vscodeignore
+node_modules/**
+envstash-*.vsix
+out/*.map
