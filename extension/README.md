@@ -55,13 +55,13 @@ To package the extension into a `.vsix` file:
    npx @vscode/vsce package --allow-missing-repository
    ```
 
-This will generate a file named `envstash-1.0.2.vsix` inside the `extension/` folder.
+This will generate a file named `envstash-1.1.0.vsix` inside the `extension/` folder.
 
 ### 2. Install inside VS Code
 - Open VS Code.
 - Go to the **Extensions View** (`Ctrl+Shift+X` or `Cmd+Shift+X`).
 - Click the three-dot menu `...` at the top right of the Extensions view header.
-- Select **Install from VSIX...** and choose the generated `envstash-1.0.2.vsix` file.
+- Select **Install from VSIX...** and choose the generated `envstash-1.1.0.vsix` file.
 
 ---
 

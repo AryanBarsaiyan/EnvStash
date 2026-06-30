@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>EnvStash</title>
+<style>
+/*PLACEHOLDER_CSS*/
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- ══ SCREEN: PROJECTS ══ -->
+<div class="screen active" id="sProj">
+  <div class="topbar">
+    <div class="topbar-logo">
+      ${SVG.lock}
+    </div>
+    <div class="topbar-actions" style="display:flex;gap:5px">
+      <button class="topbar-btn" title="Export all projects data" onclick="act('exportAll')">${SVG.upload} Export all</button>
+      <button class="topbar-btn" title="Import data from JSON" onclick="act('importFile',{merge:true})">${SVG.download} Import</button>
+    </div>
+  </div>
+
+  <div class="scroll" id="projList"></div>
+</div>
+
+<!-- ══ SCREEN: ENV (vars + runbook) ══ -->
+<div class="screen" id="sEnv">
+  <div class="env-topbar">
+    <button class="icon-btn" onclick="goBack()" title="Back">${SVG.back}</button>
+    <div class="env-dot" id="envDot"></div>
+    <span class="env-title" id="envTitle"></span>
+    <button class="reveal-btn" id="revBtn" onclick="toggleRevealAll()">${SVG.eye} Show all</button>
+  </div>
+  <div class="bc" id="bc"></div>
+
+  <div class="tabs">
+    <button class="tab active" id="tVars"    onclick="switchTab('vars')">${SVG.key} Variables</button>
+    <button class="tab"        id="tImport"  onclick="switchTab('import')">${SVG.download} Import</button>
+    <button class="tab"        id="tRunbook" onclick="switchTab('runbook')">${SVG.play} Runbook</button>
+  </div>
+
+  <!-- Variables -->
+  <div id="cVars" style="display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden">
+    <div class="search-bar" id="varSearchContainer" style="padding:7px 10px;border-bottom:1px solid var(--ev-border2);display:none;align-items:center;background:var(--ev-card)">
+      <input type="text" id="varSearch" placeholder="Search variables..." oninput="filterVars()" style="width:100%;padding:4px 8px;border-radius:4px;border:1px solid var(--ev-border);background:var(--ev-surface);color:var(--vscode-foreground);font-family:inherit;font-size:11px" autocomplete="off" spellcheck="false"/>
+    </div>
+    <div class="var-list" id="varList"></div>
+    <div class="add-form" id="addForm">
+      <div class="form-row">
+        <input type="text"     id="nKey"   placeholder="KEY_NAME" autocomplete="off" spellcheck="false"/>
+        <input type="password" id="nVal"   placeholder="value"    autocomplete="off" spellcheck="false"/>
+      </div>
+      <div class="form-btns">
+        <button class="btn btn-ghost" onclick="hideAddVar()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveNewVar()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Import tab -->
+  <div id="cImport" style="display:none;flex:1;overflow-y:auto">
+    <div class="import-body">
+      <div class="import-section">
+        <div class="import-section-hd">Paste .env block</div>
+        <div style="padding:10px 12px;display:flex;flex-direction:column;gap:7px">
+          <textarea id="pasteBox" placeholder="DB_HOST=localhost&#10;DB_PASS=secret&#10;API_KEY=abc123&#10;# comments ignored"></textarea>
+          <div class="import-hint">Supports: KEY=value · export KEY=value · KEY="quoted" · Lines starting with # are ignored · Keys must match [A-Za-z_][A-Za-z0-9_]*</div>
+          <div class="form-btns">
+            <button class="btn btn-ghost" onclick="G('pasteBox').value=''">Clear</button>
+            <button class="btn btn-primary" onclick="doImport()">Import vars</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Runbook tab -->
+  <div id="cRunbook" style="display:none;flex:1;min-height:0;overflow:hidden;flex-direction:column">
+    <div class="rb-bar" id="rbBar" style="padding:6px 10px;border-bottom:1px solid var(--ev-border2);display:none;justify-content:flex-end;background:var(--ev-card)">
+      <button class="btn btn-primary" onclick="runAll()" style="font-size:11px;padding:4px 10px;display:flex;align-items:center;gap:4px">
+        ${SVG.play} Run playbook
+      </button>
+    </div>
+    <div class="rb-scroll" id="rbList"></div>
+  </div>
+
+  <!-- Copy bar (vars only) -->
+  <div class="copy-bar" id="copyBar">
+    <button class="copy-btn copy-export" onclick="copyAll('export')">${SVG.copy} Copy as export</button>
+    <button class="copy-btn copy-env"    onclick="copyAll('env')">${SVG.file} Copy as .env</button>
+  </div>
+</div>
+
+</div><!-- end .app -->
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<!-- ENV MODAL -->
+<div class="overlay" id="envModal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="envModalTitle">New environment</div>
+    <div class="modal-field">
+      <div class="modal-label">Name</div>
+      <input type="text" class="ml" id="envName" placeholder="e.g. development, production, staging…" autocomplete="off"/>
+    </div>
+    <div class="modal-field">
+      <div class="modal-label">Color</div>
+      <div class="swatch-grid" id="swatches"></div>
+      <div class="custom-row" style="margin-top:6px">
+        <span class="custom-label">Custom:</span>
+        <input type="color" id="colorPick"/>
+      </div>
+    </div>
+    <div class="modal-field">
+      <div class="modal-label">Preview</div>
+      <span class="preview-pill" id="pillPrev">env</span>
+    </div>
+    <div class="form-btns">
+      <button class="btn btn-ghost" onclick="close_('envModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveEnvModal()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- PROJECT MODAL -->
+<div class="overlay" id="projModal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="projModalTitle">New project</div>
+    <div class="modal-field">
+      <div class="modal-label">Project name</div>
+      <input type="text" class="ml" id="projName" placeholder="e.g. my-api, rfi-builder…" autocomplete="off"/>
+    </div>
+    <div class="form-btns">
+      <button class="btn btn-ghost" onclick="close_('projModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveProjModal()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- STAGE MODAL -->
+<div class="overlay" id="stageModal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="stageTitle">New stage</div>
+    <div class="modal-field">
+      <div class="modal-label">Stage name</div>
+      <input type="text" class="ml" id="stageName" placeholder="e.g. Mock Data, Start Services, Run Migrations…" autocomplete="off"/>
+    </div>
+    <div class="modal-field" id="stageTypeField">
+      <div class="modal-label">Stage template</div>
+      <div style="display:flex;flex-direction:column;gap:6px;margin-top:2px">
+        <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer">
+          <input type="radio" name="stageType" value="empty" checked style="margin:0"/>
+          <span>Empty stage</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer">
+          <input type="radio" name="stageType" value="env" style="margin:0"/>
+          <span>Environment export stage (Pre-fills "export-env" command)</span>
+        </label>
+      </div>
+    </div>
+    <div class="form-btns">
+      <button class="btn btn-ghost" onclick="close_('stageModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveStageModal()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- COMMAND MODAL -->
+<div class="overlay" id="cmdModal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="cmdTitle">New command</div>
+    <div class="modal-field">
+      <div class="modal-label">Label</div>
+      <input type="text" class="ml" id="cmdLabel" placeholder="e.g. Start mock server, Run migrations…" autocomplete="off"/>
+    </div>
+    <div class="modal-field">
+      <div class="modal-label">Command</div>
+      <textarea class="ml" id="cmdText" placeholder="npm run mock&#10;docker-compose up -d" spellcheck="false"></textarea>
+    </div>
+    <div class="form-btns">
+      <button class="btn btn-ghost" onclick="close_('cmdModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveCmdModal()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- CONFIRM MODAL -->
+<div class="overlay" id="confModal">
+  <div class="confirm-modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="confTitle">Are you sure?</div>
+    <div class="confirm-msg" id="confMsg"></div>
+    <div class="confirm-sub" id="confSub"></div>
+    <div class="form-btns">
+      <button class="btn btn-ghost" onclick="close_('confModal')">Cancel</button>
+      <button class="btn btn-danger" onclick="doConfirm()">Delete</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/*PLACEHOLDER_JS*/
+</script>
+</body>
+</html>

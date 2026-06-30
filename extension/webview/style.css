@@ -1,0 +1,554 @@
+/* ── Reset & tokens ──────────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{
+  height:100%;
+  font-family:var(--vscode-font-family,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif);
+  font-size:14px;
+  color:var(--vscode-foreground);
+  background:var(--vscode-sideBar-background,#f3f3f3);
+  -webkit-font-smoothing:antialiased;
+}
+/* Adaptive color tokens that work on both dark + light */
+:root{
+  --ev-accent:#00897b;
+  --ev-accent-dim:rgba(0,137,123,0.12);
+  --ev-accent-border:rgba(0,137,123,0.35);
+  --ev-red:#d32f2f;
+  --ev-red-dim:rgba(211,47,47,0.10);
+  --ev-surface:var(--vscode-input-background,rgba(0,0,0,0.04));
+  --ev-card:var(--vscode-editor-background,#fff);
+  --ev-border:var(--vscode-widget-border,var(--vscode-panel-border,rgba(128,128,128,0.25)));
+  --ev-border2:var(--vscode-widget-border,var(--vscode-panel-border,rgba(128,128,128,0.15)));
+  --ev-muted:var(--vscode-icon-foreground,var(--vscode-descriptionForeground,#888));
+  --ev-hover:var(--vscode-list-hoverBackground,rgba(0,0,0,0.05));
+  --ev-header:var(--vscode-sideBarSectionHeader-background,rgba(0,0,0,0.04));
+  --ev-badge:var(--vscode-badge-background,rgba(0,0,0,0.08));
+  --ev-shadow:0 1px 4px rgba(0,0,0,0.10);
+  --ev-radius:7px;
+  --ev-radius-sm:5px;
+}
+
+/* ── Layout ────────────────────────────────────────────────── */
+.app{display:flex;flex-direction:column;height:100vh;overflow:hidden}
+.screen{display:none;flex-direction:column;flex:1;min-height:0;overflow:hidden}
+.screen.active{display:flex}
+
+/* ── Topbar ────────────────────────────────────────────────── */
+.topbar{
+  display:flex;align-items:center;gap:6px;
+  padding:9px 12px;
+  border-bottom:1px solid var(--ev-border);
+  flex-shrink:0;
+  background:var(--ev-header);
+}
+.topbar-logo{display:flex;align-items:center;gap:7px;flex:1;min-width:0}
+.topbar-logo svg{width:16px;height:16px;fill:none;stroke:var(--ev-accent);stroke-width:2.2;flex-shrink:0}
+.topbar-title{
+  font-size:12px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;
+  color:var(--vscode-sideBarTitle-foreground,var(--vscode-foreground));
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.topbar-author{font-size:9px;color:var(--ev-muted);letter-spacing:0.03em;flex-shrink:0}
+
+.icon-btn{
+  display:flex;align-items:center;justify-content:center;
+  width:26px;height:26px;border-radius:var(--ev-radius-sm);
+  background:none;border:none;cursor:pointer;
+  color:var(--ev-muted);
+  transition:background 0.12s,color 0.12s;flex-shrink:0;
+}
+.icon-btn:hover{background:var(--ev-hover);color:var(--vscode-foreground)}
+.icon-btn svg{width:15px;height:15px;display:block;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.icon-btn svg.menu-svg{fill:currentColor;stroke:none}
+
+.topbar-btn{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:4px 8px;border-radius:var(--ev-radius-sm);
+  background:none;border:1px solid var(--ev-border);
+  color:var(--ev-muted);font-size:11px;font-weight:600;
+  cursor:pointer;font-family:inherit;transition:all 0.1s;
+}
+.topbar-btn:hover{
+  background:var(--ev-hover);color:var(--vscode-foreground);
+  border-color:var(--ev-accent);
+}
+.topbar-btn svg{
+  width:12px;height:12px;display:block;fill:none;stroke:currentColor;
+  stroke-width:2;stroke-linecap:round;stroke-linejoin:round;
+}
+
+/* ── Scroll container ──────────────────────────────────────── */
+.scroll{flex:1;overflow-y:auto;padding:8px 0 16px}
+
+/* ── Project cards ─────────────────────────────────────────── */
+.proj-card{
+  margin:3px 10px 6px;
+  background:var(--ev-card);
+  border:1px solid var(--ev-border);
+  border-radius:var(--ev-radius);
+  box-shadow:var(--ev-shadow);
+  overflow:hidden;
+  transition:border-color 0.15s;
+}
+.proj-card:hover{border-color:var(--ev-accent-border)}
+
+.proj-row{
+  display:flex;align-items:center;gap:8px;
+  padding:9px 12px;cursor:pointer;user-select:none;
+  transition:background 0.1s;
+}
+.proj-row:hover{background:var(--ev-hover)}
+
+.proj-chevron{
+  width:14px;height:14px;flex-shrink:0;
+  color:var(--ev-muted);transition:transform 0.18s;
+  display:flex;align-items:center;justify-content:center;
+}
+.proj-chevron.open{transform:rotate(90deg)}
+.proj-chevron svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round}
+
+.proj-icon{width:18px;height:18px;flex-shrink:0;color:var(--ev-muted)}
+.proj-icon svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+
+.proj-name{
+  flex:1;font-size:13px;font-weight:600;
+  color:var(--vscode-foreground);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.proj-badge{
+  font-size:10px;color:var(--ev-muted);
+  background:var(--ev-badge);
+  padding:1px 7px;border-radius:10px;flex-shrink:0;
+}
+.proj-acts{display:flex;gap:1px;flex-shrink:0;opacity:0.75;transition:opacity 0.12s}
+.proj-row:hover .proj-acts, .proj-acts:hover{opacity:1}
+
+.row-btn{
+  display:flex;align-items:center;justify-content:center;
+  width:24px;height:24px;border-radius:4px;
+  background:none;border:none;cursor:pointer;
+  color:var(--ev-muted);transition:all 0.1s;
+}
+.row-btn:hover{background:var(--ev-hover);color:var(--vscode-foreground)}
+.row-btn.danger:hover{color:var(--ev-red);background:var(--ev-red-dim)}
+.row-btn svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;display:block}
+
+/* ── Env pills ─────────────────────────────────────────────── */
+.env-area{display:none;padding:2px 12px 10px 32px;border-top:1px solid var(--ev-border2)}
+.env-area.open{display:block}
+.env-pills{display:flex;flex-wrap:wrap;gap:5px;padding-top:8px}
+
+.env-pill{
+  display:inline-flex;align-items:center;gap:4px;
+  padding:4px 11px;border-radius:20px;
+  font-size:12px;font-weight:600;cursor:pointer;
+  border:1px solid transparent;transition:all 0.15s;white-space:nowrap;
+}
+.env-pill:hover{filter:brightness(1.1);transform:translateY(-1px);box-shadow:0 2px 6px rgba(0,0,0,0.15)}
+.env-pill.sel{box-shadow:0 0 0 2px currentColor}
+
+.pill-acts{display:flex;gap:1px;opacity:0.75;transition:opacity 0.12s;margin-left:2px}
+.env-pill:hover .pill-acts, .pill-acts:hover{opacity:1}
+.pill-btn{
+  background:none;border:none;cursor:pointer;
+  padding:0 2px;color:currentColor;opacity:0.65;
+  border-radius:3px;display:flex;align-items:center;transition:opacity 0.1s;
+}
+.pill-btn:hover{opacity:1}
+.pill-btn svg{width:10px;height:10px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;display:block}
+
+.add-env-btn{
+  display:inline-flex;align-items:center;gap:4px;
+  padding:4px 10px;border-radius:20px;font-size:12px;font-weight:600;
+  color:var(--ev-muted);
+  border:1.5px dashed var(--ev-border);
+  cursor:pointer;background:none;
+  transition:all 0.15s;font-family:inherit;
+}
+.add-env-btn:hover{color:var(--ev-accent);border-color:var(--ev-accent-border);background:var(--ev-accent-dim)}
+.add-env-btn svg{width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:2.5;stroke-linecap:round}
+
+/* ── Create project / add stage buttons ─────────────────────── */
+.dashed-btn{
+  display:flex;align-items:center;justify-content:center;gap:7px;
+  margin:4px 10px 6px;padding:10px 14px;
+  border-radius:var(--ev-radius);background:none;
+  border:1.5px dashed var(--ev-border);
+  color:var(--ev-muted);
+  font-size:13px;font-weight:600;cursor:pointer;
+  transition:all 0.15s;font-family:inherit;width:calc(100% - 20px);
+}
+.dashed-btn:hover{border-color:var(--ev-accent);color:var(--ev-accent);background:var(--ev-accent-dim)}
+.dashed-btn svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2.5;stroke-linecap:round}
+
+/* ── Empty states ──────────────────────────────────────────── */
+.empty{
+  display:flex;flex-direction:column;align-items:center;
+  justify-content:center;flex:1;gap:10px;
+  padding:32px 20px;text-align:center;
+}
+.empty-ico{opacity:0.55;margin-bottom:2px}
+.empty-ico svg{width:40px;height:40px;fill:none;stroke:currentColor;stroke-width:1.2}
+.empty-h{font-size:14px;font-weight:600;color:var(--vscode-foreground);opacity:0.6}
+.empty-p{font-size:12px;color:var(--ev-muted);line-height:1.6;max-width:220px}
+
+/* ── Env screen ─────────────────────────────────────────────── */
+.env-topbar{
+  display:flex;align-items:center;gap:7px;
+  padding:9px 12px;
+  border-bottom:1px solid var(--ev-border);
+  flex-shrink:0;background:var(--ev-header);
+}
+.env-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.env-title{font-size:13px;font-weight:700;flex:1;color:var(--vscode-foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bc{display:flex;align-items:center;gap:4px;padding:5px 12px 3px;font-size:11px;color:var(--ev-muted);flex-shrink:0}
+.bc-link{cursor:pointer;color:var(--ev-accent)}
+.bc-link:hover{text-decoration:underline}
+.bc-sep{opacity:0.4}
+.bc-cur{color:var(--vscode-foreground);font-weight:600}
+
+/* ── Tabs ───────────────────────────────────────────────────── */
+.tabs{display:flex;border-bottom:1px solid var(--ev-border);flex-shrink:0;background:var(--ev-header)}
+.tab{
+  padding:7px 14px;font-size:12px;font-weight:600;
+  color:var(--ev-muted);background:none;border:none;
+  cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;
+  transition:all 0.12s;font-family:inherit;white-space:nowrap;display:flex;align-items:center;gap:5px;
+}
+.tab svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.tab.active{color:var(--vscode-foreground);border-bottom-color:var(--ev-accent)}
+.tab:hover:not(.active){color:var(--vscode-foreground)}
+
+/* ── Var list ───────────────────────────────────────────────── */
+.var-list{flex:1;overflow-y:auto}
+.var-row{
+  display:grid;grid-template-columns:1fr auto auto auto auto;
+  align-items:center;gap:7px;padding:8px 12px;
+  border-bottom:1px solid var(--ev-border2);
+  transition:background 0.1s;
+}
+.var-row:hover{background:var(--ev-hover)}
+.var-key{
+  font-family:var(--vscode-editor-font-family,'SF Mono','Fira Code',monospace);
+  font-size:12px;font-weight:700;
+  color:var(--ev-accent);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.var-val{
+  font-family:var(--vscode-editor-font-family,'SF Mono','Fira Code',monospace);
+  font-size:11px;color:var(--ev-muted);
+  letter-spacing:0.05em;text-align:right;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px;
+}
+.var-val.shown{color:var(--vscode-foreground);letter-spacing:normal}
+.vbtn{
+  display:flex;align-items:center;justify-content:center;
+  width:24px;height:24px;border-radius:4px;
+  background:none;border:none;cursor:pointer;
+  color:var(--ev-muted);transition:all 0.1s;flex-shrink:0;
+}
+.vbtn:hover{background:var(--ev-hover);color:var(--vscode-foreground)}
+.vbtn.danger:hover{color:var(--ev-red);background:var(--ev-red-dim)}
+.vbtn svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;display:block}
+
+.reveal-btn{
+  display:flex;align-items:center;gap:4px;
+  padding:4px 9px;border-radius:var(--ev-radius-sm);
+  background:none;border:1px solid var(--ev-border);
+  color:var(--ev-muted);font-size:11px;cursor:pointer;font-family:inherit;
+  transition:all 0.12s;flex-shrink:0;
+}
+.reveal-btn:hover{color:var(--vscode-foreground);border-color:var(--ev-accent)}
+.reveal-btn.on{color:var(--ev-accent);border-color:var(--ev-accent-border)}
+.reveal-btn svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+.add-var-row{
+  display:flex;align-items:center;gap:7px;
+  padding:9px 12px;cursor:pointer;
+  color:var(--ev-muted);font-size:12px;font-weight:600;
+  border-top:1px dashed var(--ev-border);margin-top:2px;
+  transition:all 0.1s;
+}
+.add-var-row:hover{background:var(--ev-hover);color:var(--vscode-foreground)}
+.add-var-row svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2.5;stroke-linecap:round}
+
+/* ── Add var form ───────────────────────────────────────────── */
+.add-form{
+  display:none;flex-direction:column;gap:7px;
+  padding:11px 12px;
+  border-top:1px solid var(--ev-border);
+  background:var(--ev-surface);flex-shrink:0;
+}
+.add-form.open{display:flex}
+.form-row{display:flex;gap:7px}
+
+input,textarea{
+  background:var(--ev-card);
+  color:var(--vscode-foreground);
+  border:1px solid var(--ev-border);
+  border-radius:var(--ev-radius-sm);
+  padding:6px 9px;
+  font-family:inherit;font-size:12px;
+  outline:none;width:100%;
+  transition:border-color 0.12s;
+}
+input:focus,textarea:focus{border-color:var(--ev-accent)}
+input::placeholder,textarea::placeholder{opacity:0.4}
+
+/* password input looks like regular — don't shrink it */
+input[type="password"]{letter-spacing:0.08em}
+input[type="color"]{width:32px;height:28px;padding:2px;cursor:pointer}
+input[type="radio"],input[type="checkbox"]{width:auto;cursor:pointer}
+
+.form-btns{display:flex;gap:6px;justify-content:flex-end}
+
+/* ── Buttons ────────────────────────────────────────────────── */
+.btn{
+  padding:6px 14px;border-radius:var(--ev-radius-sm);border:none;
+  font-size:12px;font-family:inherit;font-weight:600;
+  cursor:pointer;transition:opacity 0.12s;display:inline-flex;align-items:center;gap:5px;
+}
+.btn:hover{opacity:0.85}
+.btn svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.btn-primary{background:var(--ev-accent);color:#fff}
+.btn-ghost{background:var(--vscode-button-secondaryBackground,rgba(0,0,0,0.07));color:var(--vscode-foreground)}
+.btn-danger{background:var(--ev-red-dim);color:var(--ev-red);border:1px solid rgba(211,47,47,0.25)!important}
+.btn-danger:hover{background:rgba(211,47,47,0.18)!important;opacity:1}
+
+/* ── Copy bar ───────────────────────────────────────────────── */
+.copy-bar{
+  display:flex;gap:6px;flex-shrink:0;
+  padding:9px 12px;
+  border-top:1px solid var(--ev-border);
+  background:var(--ev-header);
+}
+.copy-btn{
+  flex:1;padding:7px 10px;border-radius:var(--ev-radius-sm);border:none;
+  font-size:12px;font-weight:600;cursor:pointer;
+  font-family:inherit;display:flex;align-items:center;justify-content:center;gap:5px;
+  transition:opacity 0.12s;
+}
+.copy-btn:hover{opacity:0.85}
+.copy-btn svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.copy-export{background:var(--ev-accent);color:#fff}
+.copy-env{background:var(--vscode-button-secondaryBackground,rgba(0,0,0,0.07));color:var(--vscode-foreground)}
+
+/* ── Import body ────────────────────────────────────────────── */
+.import-body{padding:14px;display:flex;flex-direction:column;gap:10px;flex:1;overflow-y:auto}
+.import-body textarea{min-height:90px;resize:vertical;font-family:var(--vscode-editor-font-family,monospace);font-size:11px;line-height:1.6}
+.import-hint{font-size:10px;color:var(--ev-muted);line-height:1.6;opacity:0.8}
+.import-section{border:1px solid var(--ev-border);border-radius:var(--ev-radius);overflow:hidden}
+.import-section-hd{
+  padding:8px 12px;font-size:11px;font-weight:700;
+  letter-spacing:0.06em;text-transform:uppercase;color:var(--ev-muted);
+  background:var(--ev-surface);border-bottom:1px solid var(--ev-border);
+}
+
+/* ── Runbook ────────────────────────────────────────────────── */
+.rb-scroll{flex:1;overflow-y:auto;padding:6px 0 12px}
+.stage-card{
+  margin:4px 10px 8px;
+  border:1px solid var(--ev-border);border-radius:var(--ev-radius);
+  overflow:hidden;background:var(--ev-card);box-shadow:var(--ev-shadow);
+}
+.stage-card.collapsed .stage-hd{border-bottom:none}
+.stage-hd{
+  display:flex;align-items:center;gap:8px;padding:8px 12px;
+  background:var(--ev-header);border-bottom:1px solid var(--ev-border2);
+  cursor:pointer;user-select:none;transition:background 0.1s;
+}
+.stage-hd:hover{background:var(--ev-hover)}
+.stage-chevron{
+  width:14px;height:14px;flex-shrink:0;
+  color:var(--ev-muted);transition:transform 0.18s;
+  display:flex;align-items:center;justify-content:center;
+}
+.stage-chevron.open{transform:rotate(90deg)}
+.stage-chevron svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round}
+.stage-num{
+  width:20px;height:20px;border-radius:50%;
+  background:var(--ev-accent);color:#fff;
+  font-size:10px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;
+}
+.stage-name{flex:1;font-size:12px;font-weight:700;color:var(--vscode-foreground)}
+.stage-acts{display:flex;gap:1px}
+.s-btn{
+  display:flex;align-items:center;justify-content:center;
+  width:22px;height:22px;border-radius:4px;
+  background:none;border:none;cursor:pointer;
+  color:var(--ev-muted);transition:all 0.1s;
+}
+.s-btn:hover{background:var(--ev-hover);color:var(--vscode-foreground)}
+.s-btn.danger:hover{color:var(--ev-red);background:var(--ev-red-dim)}
+.s-btn svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;display:block}
+
+.cmd-row{
+  display:flex;align-items:flex-start;gap:9px;
+  padding:8px 12px;border-bottom:1px solid var(--ev-border2);
+  transition:background 0.1s;
+}
+.cmd-row:last-of-type{border-bottom:none}
+.cmd-row:hover{background:var(--ev-hover)}
+.cmd-info{flex:1;min-width:0}
+.cmd-label{font-size:11px;font-weight:700;color:var(--vscode-foreground);margin-bottom:4px}
+.cmd-code{
+  font-family:var(--vscode-editor-font-family,'SF Mono',monospace);
+  font-size:11px;color:var(--ev-accent);
+  background:var(--ev-accent-dim);
+  padding:4px 8px;border-radius:4px;
+  white-space:pre-wrap;word-break:break-all;line-height:1.5;
+  border-left:2px solid var(--ev-accent-border);
+}
+.cmd-acts{display:flex;flex-direction:column;gap:2px;flex-shrink:0;padding-top:1px}
+.c-btn{
+  display:flex;align-items:center;justify-content:center;
+  width:24px;height:24px;border-radius:4px;
+  background:none;border:none;cursor:pointer;
+  color:var(--ev-muted);transition:all 0.1s;
+}
+.c-btn:hover{background:var(--ev-hover);color:var(--vscode-foreground)}
+.c-btn.copy:hover{color:var(--ev-accent)}
+.c-btn.run:hover{color:#1976d2}
+.c-btn.danger:hover{color:var(--ev-red);background:var(--ev-red-dim)}
+.c-btn svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;display:block}
+
+.add-cmd-row{
+  display:flex;align-items:center;gap:5px;padding:7px 12px;
+  cursor:pointer;color:var(--ev-muted);font-size:11px;font-weight:600;
+  border-top:1px dashed var(--ev-border);transition:all 0.1s;
+}
+.add-cmd-row:hover{background:var(--ev-hover);color:var(--vscode-foreground)}
+.add-cmd-row svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:2.5;stroke-linecap:round}
+
+/* ── Modals ─────────────────────────────────────────────────── */
+.overlay{
+  display:none;position:fixed;inset:0;
+  background:rgba(0,0,0,0.5);z-index:200;
+  align-items:flex-end;
+}
+.overlay.open{display:flex}
+.modal{
+  width:100%;max-height:92vh;overflow-y:auto;
+  background:var(--ev-card);
+  border:1px solid var(--ev-border);border-bottom:none;
+  border-radius:12px 12px 0 0;
+  padding:4px 16px 22px;
+  display:flex;flex-direction:column;gap:13px;
+  box-shadow:0 -4px 24px rgba(0,0,0,0.18);
+}
+.modal-handle{width:34px;height:4px;border-radius:2px;background:var(--ev-border);margin:8px auto 4px;flex-shrink:0}
+.modal-title{font-size:15px;font-weight:700;color:var(--vscode-foreground)}
+.modal-field{display:flex;flex-direction:column;gap:5px}
+.modal-label{font-size:11px;font-weight:700;color:var(--ev-muted);text-transform:uppercase;letter-spacing:0.06em}
+input.ml{font-size:13px;padding:7px 10px;font-family:inherit}
+textarea.ml{min-height:80px;resize:vertical;font-family:var(--vscode-editor-font-family,monospace);font-size:11px;line-height:1.6}
+
+.confirm-modal{
+  width:100%;
+  background:var(--ev-card);
+  border:1px solid var(--ev-border);border-bottom:none;
+  border-radius:12px 12px 0 0;
+  padding:18px 16px 22px;
+  display:flex;flex-direction:column;gap:12px;
+  box-shadow:0 -4px 24px rgba(0,0,0,0.18);
+}
+.confirm-msg{font-size:13px;color:var(--vscode-foreground);line-height:1.5}
+.confirm-sub{font-size:11px;color:var(--ev-muted)}
+
+/* ── Swatches ───────────────────────────────────────────────── */
+.swatch-grid{display:flex;flex-wrap:wrap;gap:7px}
+.swatch{
+  width:28px;height:28px;border-radius:50%;cursor:pointer;
+  border:2px solid transparent;transition:all 0.12s;position:relative;flex-shrink:0;
+}
+.swatch:hover{transform:scale(1.15)}
+.swatch.sel{border-color:#fff;box-shadow:0 0 0 1.5px rgba(0,0,0,0.3)}
+.swatch.sel::before{
+  content:'';position:absolute;top:50%;left:50%;
+  width:7px;height:12px;border:2.5px solid #fff;
+  border-top:none;border-left:none;
+  transform:translate(-50%,-60%) rotate(45deg);
+  filter:drop-shadow(0 1px 2px rgba(0,0,0,0.5));
+}
+.custom-row{display:flex;align-items:center;gap:7px}
+.custom-label{font-size:11px;color:var(--ev-muted)}
+.preview-pill{
+  display:inline-flex;align-items:center;
+  padding:4px 12px;border-radius:20px;
+  font-size:12px;font-weight:600;border:1px solid transparent;
+}
+
+/* ── Toast ──────────────────────────────────────────────────── */
+.toast{
+  position:fixed;bottom:16px;left:50%;transform:translateX(-50%) translateY(60px);
+  background:var(--ev-card);border:1px solid var(--ev-border);
+  border-radius:8px;padding:8px 16px;font-size:12px;font-weight:600;
+  box-shadow:0 4px 16px rgba(0,0,0,0.2);z-index:300;
+  transition:transform 0.22s cubic-bezier(.175,.885,.32,1.275),opacity 0.22s;
+  opacity:0;white-space:nowrap;display:flex;align-items:center;gap:6px;
+}
+.toast.show{transform:translateX(-50%) translateY(0);opacity:1}
+.toast svg{width:14px;height:14px;flex-shrink:0;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.toast.ok{border-color:var(--ev-accent-border);color:var(--ev-accent)}
+.toast.err{border-color:rgba(211,47,47,0.3);color:var(--ev-red)}
+
+/* ── Flash animation ─────────────────────────────────────────── */
+@keyframes flash{0%,100%{opacity:1}50%{opacity:0.25}}
+.flashing{animation:flash 0.35s ease}
+
+/* ── Scrollbar ──────────────────────────────────────────────── */
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--ev-border);border-radius:4px}
+/* ── Drag & Drop ────────────────────────────────────────────── */
+.drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--ev-muted);
+  cursor: grab;
+  flex-shrink: 0;
+  transition: color 0.12s;
+}
+.drag-handle:hover {
+  color: var(--vscode-foreground);
+}
+.drag-handle:active {
+  cursor: grabbing;
+}
+.drag-handle svg {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+  stroke: none;
+}
+.stage-card {
+  position: relative;
+}
+.stage-card.dragging {
+  opacity: 0.4;
+  border: 1px dashed var(--ev-accent) !important;
+}
+.stage-card.drag-over-top::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--ev-accent);
+  z-index: 10;
+}
+.stage-card.drag-over-bottom::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--ev-accent);
+  z-index: 10;
+}

@@ -2,6 +2,15 @@
 
 All notable changes to the **EnvStash** extension will be documented in this file.
 
+## [1.1.0] - 2026-06-30
+
+### Added
+- Runbook stage reordering via drag-and-drop with a draggable handle.
+- Visual feedback during drag-and-drop actions (drop indicator borders and dragging opacity).
+
+### Refactored
+- Extracted inline HTML, CSS, JavaScript, and SVG assets from `extension.ts` into dedicated webview files (`webview/index.html`, `webview/style.css`, `webview/script.js`, and `src/svgs.ts`) for cleaner architecture and improved maintainability.
+
 ## [1.0.2] - 2026-06-29
 
 ### Added

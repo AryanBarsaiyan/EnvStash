@@ -2,8 +2,12 @@
   "name": "envstash",
   "displayName": "EnvStash",
   "description": "Secure per-project environment variable manager with runbooks — by Aryan Barsaiyan",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "publisher": "AryanBarsaiyan",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AryanBarsaiyan/EnvStash.git"
+  },
   "icon": "icon.png",
   "author": {
     "name": "Aryan Barsaiyan"
