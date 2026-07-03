@@ -2,6 +2,18 @@
 
 All notable changes to the **EnvStash** extension will be documented in this file.
 
+## [1.1.1] - 2026-07-03
+
+### Added
+- Dedicated **Environment Notes** section with autosave (debounced at 800ms) and secure Keychain backup/restore support.
+- Live **Markdown preview** tab for notes with a formatting helper toolbar (Bold, Italic, Code, List, Link).
+- Support for **multi-line environment variables** (e.g. certificates and private keys) via a toggleable textarea field in the UI.
+- Stateful dotenv parser in the bulk importer to correctly parse multi-line quoted values and resolve escaped newlines.
+
+### Fixed
+- Fixed webview injection bug by escaping regex substitution patterns (such as `$'` in code) inside the HTML injection process.
+- Removed the environment count badge from the home screen project rows for a cleaner interface.
+
 ## [1.1.0] - 2026-06-30
 
 ### Added

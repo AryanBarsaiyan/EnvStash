@@ -552,3 +552,104 @@ textarea.ml{min-height:80px;resize:vertical;font-family:var(--vscode-editor-font
   background: var(--ev-accent);
   z-index: 10;
 }
+
+/* ── Notes Segmented Control & Toolbar ── */
+.segmented-control {
+  display: flex;
+  background: var(--ev-surface);
+  border-radius: 4px;
+  padding: 2px;
+}
+.seg-btn {
+  background: none;
+  border: none;
+  color: var(--ev-muted);
+  padding: 3px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: all 0.1s;
+}
+.seg-btn.active {
+  background: var(--ev-card);
+  color: var(--vscode-foreground);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+}
+.tool-btn {
+  background: none;
+  border: none;
+  color: var(--ev-muted);
+  width: 22px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  cursor: pointer;
+  border-radius: 3px;
+  border: 1px solid var(--ev-border);
+  transition: all 0.1s;
+}
+.tool-btn:hover {
+  background: var(--ev-hover);
+  color: var(--vscode-foreground);
+  border-color: var(--ev-accent);
+}
+
+/* ── Markdown Preview ── */
+.markdown-body {
+  overflow-y: auto;
+  word-wrap: break-word;
+}
+.markdown-body h1, .markdown-body h2, .markdown-body h3 {
+  font-weight: 700;
+  margin-top: 10px;
+  margin-bottom: 6px;
+  color: var(--vscode-foreground);
+  border-bottom: 1px solid var(--ev-border2);
+  padding-bottom: 2px;
+}
+.markdown-body h1 { font-size: 14px; }
+.markdown-body h2 { font-size: 13px; }
+.markdown-body h3 { font-size: 12px; }
+.markdown-body p { margin-bottom: 8px; line-height: 1.5; }
+.markdown-body ul, .markdown-body ol {
+  padding-left: 18px;
+  margin-bottom: 8px;
+}
+.markdown-body li { margin-bottom: 3px; }
+.markdown-body code {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 10px;
+  background: var(--ev-surface);
+  color: var(--ev-accent);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.markdown-body pre {
+  background: var(--ev-surface);
+  padding: 8px;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin-bottom: 8px;
+  border-left: 2px solid var(--ev-accent-border);
+}
+.markdown-body pre code {
+  background: none;
+  padding: 0;
+  color: var(--vscode-foreground);
+}
+.markdown-body a {
+  color: var(--ev-accent);
+  text-decoration: none;
+}
+.markdown-body a:hover {
+  text-decoration: underline;
+}
+.empty-notes {
+  color: var(--ev-muted);
+  font-style: italic;
+  text-align: center;
+  padding-top: 20px;
+}

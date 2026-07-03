@@ -22,6 +22,7 @@ interface ExportBundle {
       id: string; name: string; color: string;
       vars: EnvVar[];
       runbook: Runbook;
+      notes?: string;
     }>;
   }>;
 }
@@ -31,6 +32,7 @@ const BUNDLE_VERSION = '1.0.0';
 
 function envKey(pid: string, eid: string) { return `envstash_proj_${pid}_env_${eid}`; }
 function runKey(pid: string, eid: string) { return `envstash_run_${pid}_env_${eid}`; }
+function noteKey(pid: string, eid: string) { return `envstash_note_${pid}_env_${eid}`; }
 function uid() { return Math.random().toString(36).slice(2, 10); }
 
 // ── Safe JSON parse ───────────────────────────────────────────────
@@ -150,6 +152,7 @@ class EnvStashProvider implements vscode.WebviewViewProvider {
           for (const e of p.envs) {
             await this._secrets.delete(envKey(msg.projectId, e.id));
             await this._secrets.delete(runKey(msg.projectId, e.id));
+            await this._secrets.delete(noteKey(msg.projectId, e.id));
           }
           idx.projects = idx.projects.filter(p => p.id !== msg.projectId);
           await this._saveIndex(idx);
@@ -191,6 +194,7 @@ class EnvStashProvider implements vscode.WebviewViewProvider {
         if (p) {
           await this._secrets.delete(envKey(msg.projectId, msg.envId));
           await this._secrets.delete(runKey(msg.projectId, msg.envId));
+          await this._secrets.delete(noteKey(msg.projectId, msg.envId));
           p.envs = p.envs.filter(e => e.id !== msg.envId);
           await this._saveIndex(idx);
         }
@@ -222,18 +226,75 @@ class EnvStashProvider implements vscode.WebviewViewProvider {
         const existing = await this._getVars(msg.projectId, msg.envId);
         const newVars: EnvVar[] = [];
         let updated = 0;
-        for (const line of ((msg.text as string) ?? '').split('\n')) {
-          const t = line.trim();
-          if (!t || t.startsWith('#')) continue;
-          const eq = t.indexOf('=');
+        const lines = ((msg.text as string) ?? '').split(/\r?\n/);
+        const parsedVars: { key: string; value: string }[] = [];
+        let currentKey: string | null = null;
+        let currentValue = '';
+        let inQuotes: '"' | "'" | null = null;
+
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i];
+
+          if (currentKey !== null && inQuotes !== null) {
+            const closingIdx = line.indexOf(inQuotes);
+            if (closingIdx !== -1) {
+              currentValue += '\n' + line.slice(0, closingIdx);
+              const finalVal = inQuotes === '"' ? currentValue.replace(/\\n/g, '\n') : currentValue;
+              parsedVars.push({ key: currentKey, value: finalVal });
+              currentKey = null;
+              currentValue = '';
+              inQuotes = null;
+            } else {
+              currentValue += '\n' + line;
+            }
+            continue;
+          }
+
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith('#')) continue;
+
+          const eq = trimmed.indexOf('=');
           if (eq === -1) continue;
-          const key   = t.slice(0, eq).trim().replace(/^export\s+/i, '');
-          const value = t.slice(eq + 1).trim().replace(/^["']|["']$/g, '');
-          if (!key || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
-          const exIdx = existing.findIndex(v => v.key === key);
-          if (exIdx >= 0) { existing[exIdx].value = value; updated++; }
-          else newVars.push({ id: uid(), key, value });
+
+          let key = trimmed.slice(0, eq).trim();
+          if (key.toLowerCase().startsWith('export ')) {
+            key = key.slice(7).trim();
+          }
+          if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
+
+          const rawVal = trimmed.slice(eq + 1).trim();
+          if (rawVal.startsWith('"') || rawVal.startsWith("'")) {
+            const q = rawVal[0] as '"' | "'";
+            const closingIdx = rawVal.indexOf(q, 1);
+            if (closingIdx !== -1) {
+              const val = rawVal.slice(1, closingIdx);
+              const finalVal = q === '"' ? val.replace(/\\n/g, '\n') : val;
+              parsedVars.push({ key, value: finalVal });
+            } else {
+              currentKey = key;
+              currentValue = rawVal.slice(1);
+              inQuotes = q;
+            }
+          } else {
+            let val = rawVal;
+            const hashIdx = rawVal.indexOf('#');
+            if (hashIdx !== -1) {
+              val = rawVal.slice(0, hashIdx).trim();
+            }
+            parsedVars.push({ key, value: val });
+          }
         }
+
+        for (const { key, value } of parsedVars) {
+          const exIdx = existing.findIndex(v => v.key === key);
+          if (exIdx >= 0) {
+            existing[exIdx].value = value;
+            updated++;
+          } else {
+            newVars.push({ id: uid(), key, value });
+          }
+        }
+
         const merged = [...existing, ...newVars];
         await this._saveVars(msg.projectId, msg.envId, merged);
         this._post({ type: 'vars', projectId: msg.projectId, envId: msg.envId, data: merged });
@@ -256,6 +317,15 @@ class EnvStashProvider implements vscode.WebviewViewProvider {
       case 'saveRunbook': {
         if (!msg.data?.stages) throw new Error('Invalid runbook data');
         await this._saveRunbook(msg.projectId, msg.envId, msg.data as Runbook);
+        break;
+      }
+      case 'getNotes': {
+        const notes = await this._getNotes(msg.projectId, msg.envId);
+        this._post({ type: 'notes', projectId: msg.projectId, envId: msg.envId, data: notes });
+        break;
+      }
+      case 'saveNotes': {
+        await this._saveNotes(msg.projectId, msg.envId, msg.notes ?? '');
         break;
       }
 
@@ -391,6 +461,12 @@ class EnvStashProvider implements vscode.WebviewViewProvider {
   private async _saveRunbook(pid: string, eid: string, rb: Runbook) {
     await this._secrets.store(runKey(pid, eid), JSON.stringify(rb));
   }
+  private async _getNotes(pid: string, eid: string): Promise<string> {
+    return await this._secrets.get(noteKey(pid, eid)) ?? '';
+  }
+  private async _saveNotes(pid: string, eid: string, notes: string) {
+    await this._secrets.store(noteKey(pid, eid), notes);
+  }
 
   // ── Export / Import ─────────────────────────────────────────────
   private async _buildBundle(projectId: string | null): Promise<ExportBundle> {
@@ -404,6 +480,7 @@ class EnvStashProvider implements vscode.WebviewViewProvider {
           id: e.id, name: e.name, color: e.color,
           vars:    await this._getVars(p.id, e.id),
           runbook: await this._getRunbook(p.id, e.id),
+          notes:   await this._getNotes(p.id, e.id),
         });
       }
       result.push({ id: p.id, name: p.name, envs });
@@ -459,6 +536,9 @@ class EnvStashProvider implements vscode.WebviewViewProvider {
         if (be.runbook?.stages?.length) {
           await this._saveRunbook(proj.id, env.id, be.runbook);
         }
+        if (be.notes) {
+          await this._saveNotes(proj.id, env.id, be.notes);
+        }
         imported++;
       }
     }
@@ -477,9 +557,9 @@ class EnvStashProvider implements vscode.WebviewViewProvider {
     const css = fs.readFileSync(cssPath, 'utf8');
     const js = fs.readFileSync(jsPath, 'utf8');
 
-    html = html.replace('/*PLACEHOLDER_CSS*/', css);
+    html = html.replace('/*PLACEHOLDER_CSS*/', () => css);
     const initialData = `const __INITIAL_INDEX__ = ${JSON.stringify(this._getIndex())};`;
-    html = html.replace('/*PLACEHOLDER_JS*/', initialData + '\n' + js);
+    html = html.replace('/*PLACEHOLDER_JS*/', () => initialData + '\n' + js);
 
     // Replace SVG placeholders
     const htmlWithSvg = html.replace(/\$\{SVG\.([a-zA-Z_]+)\}/g, (_, name) => {

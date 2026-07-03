@@ -50,6 +50,13 @@ window.addEventListener('message', e => {
   if (m.type==='runbook' && active && m.projectId===active.projectId && m.envId===active.envId) {
     rb=m.data||{stages:[]}; renderRb();
   }
+  if (m.type==='notes' && active && m.projectId===active.projectId && m.envId===active.envId) {
+    G('notesArea').value = m.data || '';
+    G('notesStatus').textContent = 'All changes saved automatically';
+    if (notesMode === 'preview') {
+      G('notesPreview').innerHTML = renderMarkdown(m.data || '');
+    }
+  }
 });
 
 /* ── Screen switch ── */
@@ -58,6 +65,7 @@ function showScreen(s){
   G('sEnv').classList.toggle('active', s==='env');
 }
 function goBack(){
+  clearTimeout(notesTimeout);
   active=null;vars=[];rb={stages:[]};revealed={};revAll=false;expandedStages=new Set();
   renderProjs(); showScreen('proj');
 }
@@ -83,7 +91,6 @@ function renderProjs(){
         <span class="proj-chevron ${open?'open':''}">${SVG.chevron}</span>
         <span class="proj-icon">${SVG.folder}</span>
         <span class="proj-name">${ESC(p.name)}</span>
-        <span class="proj-badge">${p.envs.length} env${p.envs.length!==1?'s':''}</span>
         <div class="proj-acts" onclick="event.stopPropagation()">
           <button class="row-btn" title="Export project" onclick="act('exportProject',{projectId:'${p.id}'})">${SVG.upload}</button>
           <button class="row-btn" title="Rename" onclick="openEditProj('${p.id}','${EQ(p.name)}')">${SVG.edit}</button>
@@ -160,10 +167,12 @@ function close_(id){G(id).classList.remove('open');}
 
 /* ── Env screen ── */
 function openEnv(pid,eid,name,color){
+  clearTimeout(notesTimeout);
   active={projectId:pid,envId:eid,name,color};
   vars=[];rb={stages:[]};revealed={};revAll=false;expandedStages=new Set();
   G('varSearch').value='';
   updateEnvHdr();switchTab('vars');
+  setNotesMode('edit');
   G('addForm').classList.remove('open');
   renderVars();
   vsc.postMessage({type:'getVars',projectId:pid,envId:eid});
@@ -182,13 +191,20 @@ function switchTab(t){
   G('tVars').classList.toggle('active',   t==='vars');
   G('tImport').classList.toggle('active', t==='import');
   G('tRunbook').classList.toggle('active',t==='runbook');
+  G('tNotes').classList.toggle('active',  t==='notes');
   G('cVars').style.display    =t==='vars'    ?'flex':'none';
   G('cImport').style.display  =t==='import'  ?'block':'none';
   G('cRunbook').style.display =t==='runbook' ?'flex':'none';
+  G('cNotes').style.display   =t==='notes'   ?'flex':'none';
   G('copyBar').style.display  =t==='vars'    ?'flex':'none';
   const rb_=G('revBtn');
   rb_.style.display=t==='vars'?'flex':'none';
   if(t==='runbook') vsc.postMessage({type:'getRunbook',projectId:active.projectId,envId:active.envId});
+  if(t==='notes') {
+    G('notesArea').value = '';
+    G('notesStatus').textContent = 'Loading notes...';
+    vsc.postMessage({type:'getNotes',projectId:active.projectId,envId:active.envId});
+  }
 }
 
 /* ── Var list ── */
@@ -241,12 +257,33 @@ function filterVars(){
 
 function toggleRevealAll(){revAll=!revAll;revealed={};renderVars();}
 function toggleRev(id){revealed[id]=!revealed[id];renderVars();}
-function copyVar(id){const v=vars.find(v=>v.id===id);if(v)vsc.postMessage({type:'copy',text:'export '+v.key+'='+v.value,label:'✓ '+v.key+' copied'});}
+function formatEnvValue(val) {
+  if (!val) return '';
+  if (val.includes('\n') || val.includes(' ') || val.includes('"') || val.includes("'") || val.includes('$')) {
+    const escaped = val.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    return `"${escaped}"`;
+  }
+  return val;
+}
+function copyVar(id){const v=vars.find(v=>v.id===id);if(v)vsc.postMessage({type:'copy',text:'export '+v.key+'='+formatEnvValue(v.value),label:'✓ '+v.key+' copied'});}
 function delVar(id){if(active)vsc.postMessage({type:'deleteVar',projectId:active.projectId,envId:active.envId,varId:id});}
-function showAddVar(){G('addForm').classList.add('open');G('nKey').value='';G('nVal').value='';setTimeout(()=>G('nKey').focus(),40);}
+function showAddVar(){G('addForm').classList.add('open');G('nKey').value='';G('nVal').value='';G('nValArea').value='';G('isMulti').checked=false;G('nVal').style.display='block';G('nValArea').style.display='none';setTimeout(()=>G('nKey').focus(),40);}
 function hideAddVar(){G('addForm').classList.remove('open');}
+function toggleMultiVal(){
+  const isMulti = G('isMulti').checked;
+  G('nVal').style.display = isMulti ? 'none' : 'block';
+  G('nValArea').style.display = isMulti ? 'block' : 'none';
+  if(isMulti){
+    G('nValArea').value = G('nVal').value;
+    G('nValArea').focus();
+  } else {
+    G('nVal').value = G('nValArea').value;
+    G('nVal').focus();
+  }
+}
 function saveNewVar(){
-  const key=(G('nKey').value||'').trim(),val=G('nVal').value;
+  const key=(G('nKey').value||'').trim();
+  const val=G('isMulti').checked ? G('nValArea').value : G('nVal').value;
   if(!key){toast('Key cannot be empty','err');G('nKey').focus();return;}
   if(!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)){toast('Invalid key: use letters, digits, underscores','err');G('nKey').focus();return;}
   if(!active)return;
@@ -255,7 +292,7 @@ function saveNewVar(){
 }
 function copyAll(fmt){
   if(!vars.length){toast('No variables to copy','err');return;}
-  const text=fmt==='export'?vars.map(v=>'export '+v.key+'='+v.value).join('\n'):vars.map(v=>v.key+'='+v.value).join('\n');
+  const text=fmt==='export'?vars.map(v=>'export '+v.key+'='+formatEnvValue(v.value)).join('\n'):vars.map(v=>v.key+'='+formatEnvValue(v.value)).join('\n');
   vsc.postMessage({type:'copy',text,label:'✓ '+vars.length+' vars copied'});
 }
 function doImport(){
@@ -480,3 +517,83 @@ document.addEventListener('keydown',e=>{
     if(e.target===G('cmdLabel'))  {e.preventDefault();G('cmdText').focus();}
   }
 });
+
+/* ── Environment Notes ── */
+let notesTimeout = null;
+let notesMode = 'edit';
+
+function setNotesMode(mode) {
+  notesMode = mode;
+  G('btnNotesEdit').classList.toggle('active', mode === 'edit');
+  G('btnNotesPrev').classList.toggle('active', mode === 'preview');
+  G('notesFormatBar').style.visibility = mode === 'edit' ? 'visible' : 'hidden';
+  G('notesArea').style.display = mode === 'edit' ? 'block' : 'none';
+  G('notesPreview').style.display = mode === 'preview' ? 'block' : 'none';
+
+  if (mode === 'preview') {
+    G('notesPreview').innerHTML = renderMarkdown(G('notesArea').value);
+  }
+}
+
+function insertFormat(prefix, suffix = '') {
+  const el = G('notesArea');
+  const start = el.selectionStart;
+  const end = el.selectionEnd;
+  const text = el.value;
+  const sel = text.substring(start, end);
+  const rep = prefix + sel + suffix;
+  el.value = text.substring(0, start) + rep + text.substring(end);
+  el.focus();
+  el.setSelectionRange(start + prefix.length, start + prefix.length + sel.length);
+  onNotesInput();
+}
+
+function renderMarkdown(md) {
+  if (!md || !md.trim()) return '<div class="empty-notes">No notes yet. Click Edit to add some!</div>';
+  let html = ESC(md);
+  
+  // Headers: ###, ##, #
+  html = html.replace(/^### (.*?)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.*?)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^# (.*?)$/gm, '<h1>$1</h1>');
+  
+  // Bold: **text**
+  html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  
+  // Italic: *text*
+  html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+  
+  // Code inline: `code`
+  html = html.replace(/`(.*?)`/g, '<code>$1</code>');
+  
+  // Links: [text](url)
+  html = html.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank">$1</a>');
+  
+  // Bullet lists: - item or * item
+  html = html.replace(/^\s*[-*]\s+(.*?)$/gm, '<li>$1</li>');
+  
+  // Wrap consecutive list items in <ul>
+  html = html.replace(/(<li>.*?<\/li>)+/gs, '<ul>$&</ul>');
+  
+  // Code blocks: ```js ... ```
+  html = html.replace(/```(.*?)\r?\n(.*?)\r?\n```/gs, '<pre><code>$2</code></pre>');
+  
+  // Newlines
+  html = html.replace(/\n/g, '<br>');
+  
+  return html;
+}
+
+function onNotesInput() {
+  G('notesStatus').textContent = 'Saving...';
+  clearTimeout(notesTimeout);
+  notesTimeout = setTimeout(() => {
+    vsc.postMessage({
+      type: 'saveNotes',
+      projectId: active.projectId,
+      envId: active.envId,
+      notes: G('notesArea').value
+    });
+    G('notesStatus').textContent = 'All changes saved automatically';
+  }, 800);
+}
