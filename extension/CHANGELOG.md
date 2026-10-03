@@ -2,7 +2,7 @@
 
 All notable changes to the **EnvStash** extension will be documented in this file.
 
-## [Unreleased]
+## [1.2.0] - 2026-10-03
 
 ### Added
 - **Encrypted backups**: exports can be protected with a passphrase (scrypt + AES-256-GCM). Existing plain JSON backups still import.
