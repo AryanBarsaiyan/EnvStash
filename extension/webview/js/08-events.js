@@ -1,7 +1,7 @@
 /* ── Event wiring ── */
 // The webview's CSP blocks inline handlers, so markup carries data-act / data-args instead
 const ACTIONS = {
-  act, goBack, switchTab, toggleRevealAll, toggleRev, copyVar, delVar, showAddVar, hideAddVar, saveNewVar,
+  act, goBack, switchTab, toggleRevealAll, toggleRev, copyVar, editVar, delVar, showAddVar, hideAddVar, saveNewVar,
   copyAll, doImport, clearPaste,
   toggleProj, openNewProj, openEditProj, askDelProj, saveProjModal,
   openEnv, openNewEnv, openEditEnv, askDelEnv, saveEnvModal, pickColor,

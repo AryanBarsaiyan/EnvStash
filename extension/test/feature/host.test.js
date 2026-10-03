@@ -129,6 +129,22 @@ describe('variables', () => {
     assert.deepEqual(host.vars(ids.projectId, ids.envId).map(v => v.value), ['1']);
   });
 
+  test('an update may rename the key, but not onto a key another variable uses', async t => {
+    const host = newHost(t);
+    const ids = await host.seed('api', 'dev', [['A', '1'], ['B', '2']]);
+    const [a, b] = host.vars(ids.projectId, ids.envId);
+
+    await host.send({ type: 'saveVar', ...ids, var: { id: b.id, key: 'C', value: '2' } });
+    assert.deepEqual(host.vars(ids.projectId, ids.envId).map(v => v.key), ['A', 'C']);
+
+    await host.send({ type: 'saveVar', ...ids, var: { id: b.id, key: 'A', value: '2' } });
+    assert.equal(host.errors.at(-1), 'EnvStash error: Key "A" already exists');
+    assert.deepEqual(host.vars(ids.projectId, ids.envId).map(v => v.key), ['A', 'C']);
+
+    await host.send({ type: 'saveVar', ...ids, var: { id: a.id, key: 'A', value: 'changed' } });
+    assert.equal(host.vars(ids.projectId, ids.envId)[0].value, 'changed', 'keeping its own key is not a duplicate');
+  });
+
   test('keeps a value with newlines, quotes and unicode byte-for-byte', async t => {
     const host = newHost(t);
     const ids = await host.seed();

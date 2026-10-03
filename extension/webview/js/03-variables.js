@@ -8,7 +8,7 @@ function openEnv(pid,eid){
   G('varSearch').value='';
   updateEnvHdr();switchTab('vars');
   setNotesMode('edit');
-  G('addForm').classList.remove('open');
+  hideAddVar();
   renderVars();
   vsc.postMessage({type:'getVars',projectId:pid,envId:eid});
   showScreen('env');
@@ -84,6 +84,7 @@ function renderVars(){
       <span class="var-val ${show?'shown':''}">${show?ESC(v.value):'••••••••••'}</span>
       <button class="vbtn" title="${show?'Hide':'Reveal'}" ${ON('toggleRev',v.id)}>${show?'${SVG.eyeOff}':'${SVG.eye}'}</button>
       <button class="vbtn" title="Copy export" ${ON('copyVar',v.id)}>${SVG.copy}</button>
+      <button class="vbtn" title="Edit" ${ON('editVar',v.id)}>${SVG.editSm}</button>
       <button class="vbtn danger" title="Delete" ${ON('delVar',v.id)}>${SVG.trash}</button>
     </div>`;
   }).join('');
@@ -111,7 +112,12 @@ function armAutoHide(){
   clearTimeout(hideTimer);
   if(AUTO_HIDE_MS>0 && (revAll || Object.values(revealed).some(Boolean))) hideTimer=setTimeout(hideSecrets,AUTO_HIDE_MS);
 }
-document.addEventListener('visibilitychange',()=>{ if(document.hidden) hideSecrets(); });
+document.addEventListener('visibilitychange',()=>{
+  if(!document.hidden) return;
+  hideSecrets();
+  // a value open in the edit form is masked too; only here, never on the timer, which could fire mid-typing
+  G('nVal').type='password';
+});
 function formatEnvValue(val) {
   if (!val) return '';
   if (val.includes('\n') || val.includes(' ') || val.includes('"') || val.includes("'") || val.includes('$')) {
@@ -121,9 +127,27 @@ function formatEnvValue(val) {
   return val;
 }
 function copyVar(id){const v=vars.find(v=>v.id===id);if(v)vsc.postMessage({type:'copy',text:'export '+v.key+'='+formatEnvValue(v.value),label:'✓ '+v.key+' copied',secret:true});}
-function delVar(id){if(active)vsc.postMessage({type:'deleteVar',projectId:active.projectId,envId:active.envId,varId:id});}
-function showAddVar(){G('addForm').classList.add('open');G('nKey').value='';G('nVal').value='';G('nValArea').value='';G('isMulti').checked=false;G('nVal').style.display='block';G('nValArea').style.display='none';setTimeout(()=>G('nKey').focus(),40);}
-function hideAddVar(){G('addForm').classList.remove('open');}
+function delVar(id){if(id===editVarId)hideAddVar();if(active)vsc.postMessage({type:'deleteVar',projectId:active.projectId,envId:active.envId,varId:id});}
+// The form below the list adds a variable, or edits one when editVarId is set
+let editVarId = null;
+function openVarForm(v){
+  const multi = !!v && v.value.includes('\n');
+  editVarId = v ? v.id : null;
+  G('varFormTitle').textContent = v ? 'Edit variable' : 'New variable';
+  G('nKey').value = v ? v.key : '';
+  G('nVal').value = v && !multi ? v.value : '';
+  G('nValArea').value = v ? v.value : '';
+  // a value can't sensibly be edited blind, so editing shows it; adding stays masked
+  G('nVal').type = v ? 'text' : 'password';
+  G('isMulti').checked = multi;
+  G('nVal').style.display = multi ? 'none' : 'block';
+  G('nValArea').style.display = multi ? 'block' : 'none';
+  G('addForm').classList.add('open');
+  setTimeout(()=>G(!v ? 'nKey' : multi ? 'nValArea' : 'nVal').focus(),40);
+}
+function showAddVar(){openVarForm(null);}
+function editVar(id){const v=vars.find(v=>v.id===id);if(v)openVarForm(v);}
+function hideAddVar(){G('addForm').classList.remove('open');editVarId=null;G('nVal').type='password';}
 function toggleMultiVal(){
   const isMulti = G('isMulti').checked;
   G('nVal').style.display = isMulti ? 'none' : 'block';
@@ -142,7 +166,7 @@ function saveNewVar(){
   if(!key){toast('Key cannot be empty','err');G('nKey').focus();return;}
   if(!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)){toast('Invalid key: use letters, digits, underscores','err');G('nKey').focus();return;}
   if(!active)return;
-  vsc.postMessage({type:'saveVar',projectId:active.projectId,envId:active.envId,var:{id:Math.random().toString(36).slice(2,10),key,value:val}});
+  vsc.postMessage({type:'saveVar',projectId:active.projectId,envId:active.envId,var:{id:editVarId||Math.random().toString(36).slice(2,10),key,value:val}});
   hideAddVar();
 }
 function copyAll(fmt){

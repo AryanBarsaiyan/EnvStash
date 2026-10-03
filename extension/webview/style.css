@@ -222,7 +222,7 @@ html,body{
 /* ── Var list ───────────────────────────────────────────────── */
 .var-list{flex:1;overflow-y:auto}
 .var-row{
-  display:grid;grid-template-columns:1fr auto auto auto auto;
+  display:grid;grid-template-columns:1fr auto auto auto auto auto;
   align-items:center;gap:7px;padding:8px 12px;
   border-bottom:1px solid var(--ev-border2);
   transition:background 0.1s;

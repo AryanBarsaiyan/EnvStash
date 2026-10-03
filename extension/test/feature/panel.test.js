@@ -351,6 +351,140 @@ describe('variables tab', () => {
     assert.deepEqual(panel.varRows().map(r => r.key), ['B']);
   });
 
+  describe('editing a variable', () => {
+    const editButton = (panel, i = 0) => panel.varRows()[i].row.querySelector('[title="Edit"]');
+    const stored = ({ host, ids }) => host.vars(ids.projectId, ids.envId);
+
+    test('opens the form with the current key and value, and saves the change in place', async t => {
+      const ctx = await inEnv(t, { vars: [['FIRST', '1'], ['API_KEY', 'old value'], ['LAST', '3']] });
+      const { panel } = ctx;
+      const id = stored(ctx)[1].id;
+
+      await panel.click(editButton(panel, 1));
+      assert.equal(panel.text('#varFormTitle'), 'Edit variable');
+      assert.deepEqual([panel.$('#nKey').value, panel.$('#nVal').value], ['API_KEY', 'old value']);
+
+      await panel.type('#nVal', 'new value');
+      await panel.click('#addForm .btn-primary');
+
+      assert.deepEqual(stored(ctx).map(v => [v.key, v.value]), [['FIRST', '1'], ['API_KEY', 'new value'], ['LAST', '3']]);
+      assert.equal(stored(ctx)[1].id, id, 'same variable, same position: not deleted and re-added');
+      assert.ok(!panel.$('#addForm').classList.contains('open'));
+    });
+
+    test('can rename the key', async t => {
+      const ctx = await inEnv(t, { vars: [['OLD_NAME', 'v']] });
+      await ctx.panel.click(editButton(ctx.panel));
+      await ctx.panel.type('#nKey', 'NEW_NAME');
+      await ctx.panel.click('#addForm .btn-primary');
+      assert.deepEqual(stored(ctx).map(v => [v.key, v.value]), [['NEW_NAME', 'v']]);
+      assert.deepEqual(ctx.panel.varRows().map(r => r.key), ['NEW_NAME']);
+    });
+
+    test('renaming onto another variable\'s key is refused and nothing changes', async t => {
+      const ctx = await inEnv(t, { vars: [['A', '1'], ['B', '2']] });
+      await ctx.panel.click(editButton(ctx.panel, 1));
+      await ctx.panel.type('#nKey', 'A');
+      await ctx.panel.click('#addForm .btn-primary');
+      assert.equal(ctx.host.errors.at(-1), 'EnvStash error: Key "A" already exists');
+      assert.deepEqual(stored(ctx).map(v => [v.key, v.value]), [['A', '1'], ['B', '2']]);
+    });
+
+    test('an invalid key is refused before anything is sent', async t => {
+      const ctx = await inEnv(t, { vars: [['A', '1']] });
+      await ctx.panel.click(editButton(ctx.panel));
+      await ctx.panel.type('#nKey', 'not valid');
+      await ctx.panel.click('#addForm .btn-primary');
+      assert.match(ctx.panel.text('#toast'), /Invalid key/);
+      assert.deepEqual(stored(ctx).map(v => v.key), ['A']);
+      assert.ok(ctx.panel.$('#addForm').classList.contains('open'), 'the form stays open to fix it');
+    });
+
+    test('a multi-line value opens in the multi-line editor with its line breaks', async t => {
+      const ctx = await inEnv(t, { vars: [['CERT', 'line one\nline two']] });
+      const { panel } = ctx;
+      await panel.click(editButton(panel));
+      assert.ok(panel.$('#isMulti').checked);
+      assert.ok(panel.visible('#nValArea') && !panel.visible('#nVal'));
+      assert.equal(panel.$('#nValArea').value, 'line one\nline two');
+
+      await panel.type('#nValArea', 'line one\nline two\nline three');
+      await panel.click('#addForm .btn-primary');
+      assert.equal(stored(ctx)[0].value, 'line one\nline two\nline three');
+    });
+
+    test('Cancel discards the edit', async t => {
+      const ctx = await inEnv(t, { vars: [['A', 'original']] });
+      await ctx.panel.click(editButton(ctx.panel));
+      await ctx.panel.type('#nVal', 'changed');
+      await ctx.panel.click('#addForm .btn-ghost');
+      assert.deepEqual(stored(ctx).map(v => v.value), ['original']);
+      assert.ok(!ctx.panel.$('#addForm').classList.contains('open'));
+    });
+
+    test('"Add variable" after an edit starts empty and adds a new variable', async t => {
+      const ctx = await inEnv(t, { vars: [['A', '1']] });
+      await ctx.panel.click(editButton(ctx.panel));
+      await ctx.panel.click('#addForm .btn-ghost');
+
+      await ctx.panel.click('.add-var-row');
+      assert.equal(ctx.panel.text('#varFormTitle'), 'New variable');
+      assert.deepEqual([ctx.panel.$('#nKey').value, ctx.panel.$('#nVal').value], ['', '']);
+      await ctx.panel.type('#nKey', 'B');
+      await ctx.panel.type('#nVal', '2');
+      await ctx.panel.click('#addForm .btn-primary');
+      assert.deepEqual(stored(ctx).map(v => [v.key, v.value]), [['A', '1'], ['B', '2']]);
+    });
+
+    test('switching from editing straight to adding does not overwrite the edited variable', async t => {
+      const ctx = await inEnv(t, { vars: [['A', '1']] });
+      await ctx.panel.click(editButton(ctx.panel));
+      await ctx.panel.click('.add-var-row');
+      await ctx.panel.type('#nKey', 'B');
+      await ctx.panel.type('#nVal', '2');
+      await ctx.panel.click('#addForm .btn-primary');
+      assert.deepEqual(stored(ctx).map(v => [v.key, v.value]), [['A', '1'], ['B', '2']]);
+    });
+
+    test('the value is visible while editing and masked again when adding or when the panel hides', async t => {
+      const ctx = await inEnv(t, { vars: [['A', 'secret']] });
+      const { panel } = ctx;
+      assert.equal(panel.$('#nVal').type, 'password');
+
+      await panel.click(editButton(panel));
+      assert.equal(panel.$('#nVal').type, 'text');
+      await panel.setHidden(true);
+      assert.equal(panel.$('#nVal').type, 'password', 'no secret left readable when the panel is hidden');
+      await panel.setHidden(false);
+
+      await panel.click(editButton(panel));
+      await panel.click('.add-var-row');
+      assert.equal(panel.$('#nVal').type, 'password');
+    });
+
+    test('editing does not reveal the value in the list', async t => {
+      const ctx = await inEnv(t, { vars: [['A', 'secret']] });
+      await ctx.panel.click(editButton(ctx.panel));
+      assert.equal(ctx.panel.varRows()[0].value, '••••••••••');
+    });
+
+    test('deleting the variable being edited closes the form instead of re-creating it on save', async t => {
+      const ctx = await inEnv(t, { vars: [['A', '1'], ['B', '2']] });
+      await ctx.panel.click(editButton(ctx.panel, 0));
+      await ctx.panel.click(ctx.panel.varRows()[0].row.querySelector('[title="Delete"]'));
+      assert.ok(!ctx.panel.$('#addForm').classList.contains('open'));
+      assert.deepEqual(stored(ctx).map(v => v.key), ['B']);
+    });
+
+    test('leaving the environment closes the form', async t => {
+      const ctx = await inEnv(t, { vars: [['A', '1']] });
+      await ctx.panel.click(editButton(ctx.panel));
+      await ctx.panel.click('.env-topbar .icon-btn');
+      await ctx.panel.openEnv('dev');
+      assert.ok(!ctx.panel.$('#addForm').classList.contains('open'));
+    });
+  });
+
   test('search filters by key or value and says when nothing matches', async t => {
     const { panel } = await inEnv(t, { vars: [['DB_HOST', 'localhost'], ['DB_PORT', '5432'], ['API_KEY', 'abc']] });
     await panel.type('#varSearch', 'db_');

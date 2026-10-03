@@ -21,11 +21,12 @@ export class EnvDataService {
     const value = input?.value ?? '';
     const vars = await this._store.getVars(pid, eid);
     const existing = vars.find(v => v.id === input?.id);
+    // also on rename: two variables with the same key would shadow each other when exported
+    if (vars.some(v => v !== existing && v.key === key)) throw new Error(`Key "${key}" already exists`);
     if (existing) {
       existing.key = key;
       existing.value = value;
     } else {
-      if (vars.some(v => v.key === key)) throw new Error(`Key "${key}" already exists`);
       vars.push({ id: input?.id || uid(), key, value });
     }
     await this._store.saveVars(pid, eid, vars);
