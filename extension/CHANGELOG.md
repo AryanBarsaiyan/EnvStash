@@ -17,6 +17,10 @@ All notable changes to the **EnvStash** extension will be documented in this fil
 ### Fixed
 - Storage requests from the panel are processed one at a time, so a read can no longer overtake the save before it.
 - Notes typed just before leaving an environment or switching tabs are no longer dropped.
+- Shell detection no longer mistakes the extension's own "EnvStash" terminal (or any name containing "sh") for a POSIX shell, which made `export-env` emit `export …` in PowerShell on Windows.
+
+### Tests
+- Added a unit and feature test suite (`npm test`) covering the `.env` parser, backup encryption, shell detection, the Markdown renderer, every host message, and the panel UI driven through jsdom.
 
 ## [1.1.1] - 2026-07-03
 

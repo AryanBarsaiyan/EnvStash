@@ -5,3 +5,4 @@ tsconfig.json
 node_modules/**
 envstash-*.vsix
 out/*.map
+test/**

@@ -42,8 +42,72 @@ function safeJson<T>(raw: string | undefined, fallback: T): T {
   try { return JSON.parse(raw) as T; } catch { return fallback; }
 }
 
+// ── .env parsing ──────────────────────────────────────────────────
+// Supports KEY=value, export KEY=value, quoted values (multi-line allowed) and # comments
+export function parseDotenv(text: string): { key: string; value: string }[] {
+  const lines = text.split(/\r?\n/);
+  const parsedVars: { key: string; value: string }[] = [];
+  let currentKey: string | null = null;
+  let currentValue = '';
+  let inQuotes: '"' | "'" | null = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (currentKey !== null && inQuotes !== null) {
+      const closingIdx = line.indexOf(inQuotes);
+      if (closingIdx !== -1) {
+        currentValue += '\n' + line.slice(0, closingIdx);
+        const finalVal = inQuotes === '"' ? currentValue.replace(/\\n/g, '\n') : currentValue;
+        parsedVars.push({ key: currentKey, value: finalVal });
+        currentKey = null;
+        currentValue = '';
+        inQuotes = null;
+      } else {
+        currentValue += '\n' + line;
+      }
+      continue;
+    }
+
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+
+    const eq = trimmed.indexOf('=');
+    if (eq === -1) continue;
+
+    let key = trimmed.slice(0, eq).trim();
+    if (key.toLowerCase().startsWith('export ')) {
+      key = key.slice(7).trim();
+    }
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
+
+    const rawVal = trimmed.slice(eq + 1).trim();
+    if (rawVal.startsWith('"') || rawVal.startsWith("'")) {
+      const q = rawVal[0] as '"' | "'";
+      const closingIdx = rawVal.indexOf(q, 1);
+      if (closingIdx !== -1) {
+        const val = rawVal.slice(1, closingIdx);
+        const finalVal = q === '"' ? val.replace(/\\n/g, '\n') : val;
+        parsedVars.push({ key, value: finalVal });
+      } else {
+        currentKey = key;
+        currentValue = rawVal.slice(1);
+        inQuotes = q;
+      }
+    } else {
+      let val = rawVal;
+      const hashIdx = rawVal.indexOf('#');
+      if (hashIdx !== -1) {
+        val = rawVal.slice(0, hashIdx).trim();
+      }
+      parsedVars.push({ key, value: val });
+    }
+  }
+  return parsedVars;
+}
+
 // ── Backup encryption (scrypt + AES-256-GCM) ──────────────────────
-interface EncryptedBundle {
+export interface EncryptedBundle {
   format: 'envstash-encrypted';
   v: 1;
   kdf: { name: 'scrypt'; N: number; r: number; p: number; salt: string };
@@ -62,7 +126,7 @@ function deriveKey(pass: string, salt: Buffer, N: number, r: number, p: number):
   });
 }
 
-async function encryptBundle(json: string, pass: string): Promise<EncryptedBundle> {
+export async function encryptBundle(json: string, pass: string): Promise<EncryptedBundle> {
   const salt = crypto.randomBytes(16);
   const iv = crypto.randomBytes(12);
   const key = await deriveKey(pass, salt, SCRYPT.N, SCRYPT.r, SCRYPT.p);
@@ -76,7 +140,7 @@ async function encryptBundle(json: string, pass: string): Promise<EncryptedBundl
   };
 }
 
-async function decryptBundle(enc: EncryptedBundle, pass: string): Promise<string> {
+export async function decryptBundle(enc: EncryptedBundle, pass: string): Promise<string> {
   const { N, r, p, salt } = enc.kdf ?? ({} as EncryptedBundle['kdf']);
   // Cost parameters come from the file, so bound them before spending memory on them
   const okParams = enc.v === 1 && enc.kdf?.name === 'scrypt' && enc.cipher?.name === 'aes-256-gcm'
@@ -178,7 +242,7 @@ class EnvStashProvider implements vscode.WebviewViewProvider {
     wv.webview.onDidReceiveMessage((msg) => {
       // Export/import wait on dialogs, so they stay off the queue and only enqueue their storage work
       const work = TRANSFER_MSGS.has(msg?.type) ? this._handleTransfer(msg) : this._enqueue(() => this._handle(msg));
-      work.catch((err: any) => vscode.window.showErrorMessage(`EnvStash error: ${err?.message ?? err}`));
+      return work.catch((err: any) => { vscode.window.showErrorMessage(`EnvStash error: ${err?.message ?? err}`); });
     });
   }
 
@@ -318,66 +382,7 @@ class EnvStashProvider implements vscode.WebviewViewProvider {
         const existing = await this._getVars(msg.projectId, msg.envId);
         const newVars: EnvVar[] = [];
         let updated = 0;
-        const lines = ((msg.text as string) ?? '').split(/\r?\n/);
-        const parsedVars: { key: string; value: string }[] = [];
-        let currentKey: string | null = null;
-        let currentValue = '';
-        let inQuotes: '"' | "'" | null = null;
-
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i];
-
-          if (currentKey !== null && inQuotes !== null) {
-            const closingIdx = line.indexOf(inQuotes);
-            if (closingIdx !== -1) {
-              currentValue += '\n' + line.slice(0, closingIdx);
-              const finalVal = inQuotes === '"' ? currentValue.replace(/\\n/g, '\n') : currentValue;
-              parsedVars.push({ key: currentKey, value: finalVal });
-              currentKey = null;
-              currentValue = '';
-              inQuotes = null;
-            } else {
-              currentValue += '\n' + line;
-            }
-            continue;
-          }
-
-          const trimmed = line.trim();
-          if (!trimmed || trimmed.startsWith('#')) continue;
-
-          const eq = trimmed.indexOf('=');
-          if (eq === -1) continue;
-
-          let key = trimmed.slice(0, eq).trim();
-          if (key.toLowerCase().startsWith('export ')) {
-            key = key.slice(7).trim();
-          }
-          if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
-
-          const rawVal = trimmed.slice(eq + 1).trim();
-          if (rawVal.startsWith('"') || rawVal.startsWith("'")) {
-            const q = rawVal[0] as '"' | "'";
-            const closingIdx = rawVal.indexOf(q, 1);
-            if (closingIdx !== -1) {
-              const val = rawVal.slice(1, closingIdx);
-              const finalVal = q === '"' ? val.replace(/\\n/g, '\n') : val;
-              parsedVars.push({ key, value: finalVal });
-            } else {
-              currentKey = key;
-              currentValue = rawVal.slice(1);
-              inQuotes = q;
-            }
-          } else {
-            let val = rawVal;
-            const hashIdx = rawVal.indexOf('#');
-            if (hashIdx !== -1) {
-              val = rawVal.slice(0, hashIdx).trim();
-            }
-            parsedVars.push({ key, value: val });
-          }
-        }
-
-        for (const { key, value } of parsedVars) {
+        for (const { key, value } of parseDotenv((msg.text as string) ?? '')) {
           const exIdx = existing.findIndex(v => v.key === key);
           if (exIdx >= 0) {
             existing[exIdx].value = value;
@@ -697,28 +702,30 @@ function settingSeconds(name: string, fallback: number): number {
   return typeof n === 'number' && n > 0 ? Math.min(n, 3600) : 0;
 }
 
-function detectShell(term: vscode.Terminal): 'pwsh' | 'cmd' | 'bash' {
+export function detectShell(term: vscode.Terminal): 'pwsh' | 'cmd' | 'bash' {
   const name = term.name.toLowerCase();
   if (name.includes('powershell') || name.includes('pwsh')) {
     return 'pwsh';
   }
-  if (name.includes('cmd')) {
+  if (/\bcmd\b|command prompt/.test(name)) {
     return 'cmd';
   }
-  if (name.includes('bash') || name.includes('zsh') || name.includes('sh') || name.includes('fish')) {
+  // whole words only: a bare "sh" substring also matches our own "EnvStash" terminal
+  if (/\b(bash|zsh|sh|fish)\b/.test(name)) {
     return 'bash';
   }
 
   const opt = term.creationOptions as vscode.TerminalOptions;
   if (opt?.shellPath) {
-    const shellPath = opt.shellPath.toLowerCase();
-    if (shellPath.includes('powershell') || shellPath.includes('pwsh') || shellPath.includes('powershell.exe') || shellPath.includes('pwsh.exe')) {
+    // match the executable name, not folder names along the path
+    const exe = (opt.shellPath.toLowerCase().split(/[\\/]/).pop() ?? '').replace(/\.exe$/, '');
+    if (exe === 'powershell' || exe === 'pwsh') {
       return 'pwsh';
     }
-    if (shellPath.includes('cmd.exe')) {
+    if (exe === 'cmd') {
       return 'cmd';
     }
-    if (shellPath.includes('bash') || shellPath.includes('zsh') || shellPath.includes('sh') || shellPath.includes('fish')) {
+    if (['bash', 'zsh', 'sh', 'fish', 'dash', 'ksh'].includes(exe)) {
       return 'bash';
     }
   }

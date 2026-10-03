@@ -77,11 +77,16 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "test": "node --test \"test/**/*.test.js\"",
+    "test:unit": "npm run compile && node --test \"test/unit/*.test.js\"",
+    "test:feature": "npm run compile && node --test \"test/feature/*.test.js\""
   },
   "devDependencies": {
-    "@types/vscode": "^1.85.0",
     "@types/node": "^18.0.0",
+    "@types/vscode": "^1.85.0",
+    "jsdom": "^30.1.1",
     "typescript": "^5.0.0"
   }
 }
