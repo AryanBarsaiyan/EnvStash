@@ -70,6 +70,34 @@ export class ProjectService {
     return idx;
   }
 
+  /** Copies an environment with all its variables, runbook and notes, placed right after the original. */
+  async duplicateEnv(projectId: string, envId: string, rawName: unknown, color?: string): Promise<VaultIndex> {
+    const name = requireName(rawName, 'Environment');
+    const idx = this._store.getIndex();
+    const p = idx.projects.find(p => p.id === projectId);
+    if (!p) throw new Error('Project not found');
+    const sourceAt = p.envs.findIndex(e => e.id === envId);
+    if (sourceAt < 0) throw new Error('Environment not found');
+    if (p.envs.some(e => sameName(e.name, name)))
+      throw new Error(`Environment "${name}" already exists in this project`);
+
+    // fresh ids throughout, so editing the copy can never be mistaken for editing the original
+    const copy = { id: uid(), name, color: color || p.envs[sourceAt].color };
+    const vars = (await this._store.getVars(projectId, envId)).map(v => ({ ...v, id: uid() }));
+    const runbook = await this._store.getRunbook(projectId, envId);
+    const stages = runbook.stages.map(s => ({
+      ...s, id: uid(), commands: s.commands.map(c => ({ ...c, id: uid() })),
+    }));
+    const notes = await this._store.getNotes(projectId, envId);
+
+    if (vars.length) await this._store.saveVars(projectId, copy.id, vars);
+    if (stages.length) await this._store.saveRunbook(projectId, copy.id, { stages });
+    if (notes) await this._store.saveNotes(projectId, copy.id, notes);
+    p.envs.splice(sourceAt + 1, 0, copy);
+    await this._store.saveIndex(idx);
+    return idx;
+  }
+
   async deleteEnv(projectId: string, envId: string): Promise<VaultIndex> {
     const idx = this._store.getIndex();
     const p = idx.projects.find(p => p.id === projectId);

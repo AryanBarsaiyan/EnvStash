@@ -34,6 +34,7 @@ function renderProjs(){
               ${ESC(e.name)}
               <span class="pill-acts" data-stop>
                 <button class="pill-btn" title="Edit" ${ON('openEditEnv',p.id,e.id)}>${SVG.editSm}</button>
+                <button class="pill-btn" title="Duplicate" ${ON('openDupEnv',p.id,e.id)}>${SVG.copy}</button>
                 <button class="pill-btn" title="Delete" ${ON('askDelEnv',p.id,e.id)}>${SVG.xSm}</button>
               </span>
             </span>`;
@@ -79,10 +80,23 @@ function refreshPill(){const n=G('envName').value.trim()||'env';const p=G('pillP
 
 function openNewEnv(pid){envMode='create';envPid=pid;envEid=null;selColor='#4ec994';G('envModalTitle').textContent='New environment';G('envName').value='';buildSwatches();open_('envModal');setTimeout(()=>G('envName').focus(),60);}
 function openEditEnv(pid,eid){const env=findEnv(pid,eid);envMode='rename';envPid=pid;envEid=eid;selColor=COLOR(env?.color);G('envModalTitle').textContent='Edit environment';G('envName').value=env?.name??'';buildSwatches();open_('envModal');setTimeout(()=>G('envName').focus(),60);}
+// Duplicating reuses the env dialog: envEid is the environment being copied
+function openDupEnv(pid,eid){
+  const env=findEnv(pid,eid);
+  if(!env)return;
+  const taken=new Set(findProj(pid).envs.map(e=>e.name.toLowerCase()));
+  let name=env.name+' copy';
+  for(let i=2;taken.has(name.toLowerCase());i++) name=env.name+' copy '+i;
+  envMode='duplicate';envPid=pid;envEid=eid;selColor=COLOR(env.color);
+  G('envModalTitle').textContent='Duplicate environment';G('envName').value=name;
+  buildSwatches();open_('envModal');
+  setTimeout(()=>{G('envName').focus();G('envName').select();},60);
+}
 function saveEnvModal(){
   const n=G('envName').value.trim();
   if(!n){toast('Environment name cannot be empty','err');G('envName').focus();return;}
   if(envMode==='create'){openSet.add(envPid);vsc.postMessage({type:'createEnv',projectId:envPid,name:n,color:selColor});}
+  else if(envMode==='duplicate'){vsc.postMessage({type:'duplicateEnv',projectId:envPid,envId:envEid,name:n,color:selColor});}
   else{if(active&&active.envId===envEid){active.name=n;active.color=selColor;updateEnvHdr();}vsc.postMessage({type:'renameEnv',projectId:envPid,envId:envEid,name:n,color:selColor});}
   close_('envModal');
 }
@@ -90,6 +104,7 @@ function saveEnvModal(){
 /* ── Modal open/close ── */
 function open_(id){G(id).classList.add('open');}
 function close_(id){G(id).classList.remove('open');}
-['envModal','projModal','stageModal','cmdModal','confModal'].forEach(id=>{
+const MODALS=['envModal','projModal','stageModal','cmdModal','confModal','cmpModal'];
+MODALS.forEach(id=>{
   G(id).addEventListener('click',e=>{if(e.target===G(id))close_(id);});
 });

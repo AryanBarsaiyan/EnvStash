@@ -11,7 +11,7 @@ function toast(msg,type='ok'){
 /* ── Keyboard ── */
 document.addEventListener('keydown',e=>{
   if(e.key==='Escape'){
-    ['envModal','projModal','stageModal','cmdModal','confModal'].forEach(close_);
+    MODALS.forEach(close_);
   }
   if(e.key==='Enter'){
     if(e.target===G('nVal'))      {e.preventDefault();saveNewVar();}

@@ -33,6 +33,7 @@
     <button class="icon-btn" data-act="goBack" title="Back">${SVG.back}</button>
     <div class="env-dot" id="envDot"></div>
     <span class="env-title" id="envTitle"></span>
+    <button class="icon-btn cmp-btn" id="cmpBtn" data-act="openCompare" title="Compare with another environment">${SVG.compare}</button>
     <button class="reveal-btn" id="revBtn" data-act="toggleRevealAll">${SVG.eye} Show all</button>
   </div>
   <div class="bc" id="bc"></div>
@@ -228,6 +229,25 @@
     <div class="form-btns">
       <button class="btn btn-ghost" data-act="close_" data-args='["cmdModal"]'>Cancel</button>
       <button class="btn btn-primary" data-act="saveCmdModal">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- COMPARE MODAL -->
+<div class="overlay" id="cmpModal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Compare environments</div>
+    <div class="cmp-head">
+      <span class="cmp-this" id="cmpThis"></span>
+      <span class="cmp-vs">vs</span>
+      <select id="cmpOther" aria-label="Environment to compare with"></select>
+    </div>
+    <div class="cmp-summary" id="cmpSummary"></div>
+    <div class="cmp-list" id="cmpList"></div>
+    <div class="form-btns">
+      <button class="btn btn-ghost" id="cmpShowBtn" data-act="toggleCompareValues">Show values</button>
+      <button class="btn btn-primary" data-act="close_" data-args='["cmpModal"]'>Close</button>
     </div>
   </div>
 </div>

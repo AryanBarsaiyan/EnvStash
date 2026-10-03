@@ -5,7 +5,12 @@ import { VaultIndex } from '../model';
 import { SVG } from '../svgs';
 
 /** What the page script receives as `__INITIAL__` when it starts. */
-export interface InitialData { index: VaultIndex; autoHideMs: number; }
+export interface InitialData {
+  index: VaultIndex;
+  autoHideMs: number;
+  /** Environment to open straight away instead of the project list. */
+  open?: { projectId: string; envId: string };
+}
 
 /** Assembles the panel page from webview/index.html, style.css and the scripts in webview/js. */
 export function renderPanelHtml(extensionPath: string, data: InitialData): string {

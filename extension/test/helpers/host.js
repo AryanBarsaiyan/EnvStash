@@ -44,6 +44,11 @@ function createHost(options = {}) {
     terminals: [],
     activeTerminal: undefined,
     secretStoreDelay: 0,       // ms; makes writes slow to expose ordering bugs
+    workspaceState: new Map(), // context.workspaceState
+    statusBarItems: [],
+    quickPicks: [],            // the item lists offered by showQuickPick
+    pick: undefined,           // (items) => chosen item; undefined = dismissed
+    executed: [],              // ids passed to executeCommand
   };
 
   const makeTerminal = (name, creationOptions = {}) => {
@@ -55,7 +60,15 @@ function createHost(options = {}) {
 
   const vscode = {
     Uri: { file: fsPath => ({ fsPath }) },
+    StatusBarAlignment: { Left: 1, Right: 2 },
     window: {
+      createStatusBarItem: () => {
+        const item = { text: '', tooltip: '', command: undefined, visible: false, disposed: false,
+          show() { this.visible = true; }, hide() { this.visible = false; }, dispose() { this.disposed = true; } };
+        host.statusBarItems.push(item);
+        return item;
+      },
+      showQuickPick: async items => { host.quickPicks.push(items); return host.pick ? host.pick(items) : undefined; },
       get activeTerminal() { return host.activeTerminal; },
       createTerminal: name => makeTerminal(name),
       registerWebviewViewProvider: (_id, provider) => { host.provider = provider; return { dispose() {} }; },
@@ -78,7 +91,7 @@ function createHost(options = {}) {
     commands: {
       registered: {},
       registerCommand(id, fn) { this.registered[id] = fn; return { dispose() {} }; },
-      executeCommand: async () => {},
+      executeCommand: async id => { host.executed.push(id); },
     },
     workspace: {
       fs: {
@@ -113,6 +126,10 @@ function createHost(options = {}) {
       get: key => host.globalState.get(key),
       update: async (key, value) => { host.globalState.set(key, value); },
     },
+    workspaceState: {
+      get: key => host.workspaceState.get(key),
+      update: async (key, value) => { host.workspaceState.set(key, value); },
+    },
   };
 
   host.vscode = vscode;
@@ -121,6 +138,7 @@ function createHost(options = {}) {
 
   let listener;
   const view = {
+    onDidDispose: fn => { view.dispose = fn; return { dispose() {} }; },
     webview: {
       options: {}, html: '',
       postMessage: message => { host.posted.push(message); if (host.onPost) host.onPost(message); },
@@ -131,7 +149,11 @@ function createHost(options = {}) {
 
   /** (Re)opens the panel and returns the HTML the webview would load. */
   host.html = () => { host.provider.resolveWebviewView(view); return view.webview.html; };
-  host.html();
+  // the panel is normally open; pass { panelClosed: true } to start before it was ever shown
+  if (!options.panelClosed) host.html();
+
+  /** The text shown in the status bar. */
+  host.statusBar = () => host.statusBarItems[0];
 
   /** Delivers a webview message and resolves once the extension has finished handling it. */
   host.send = message => listener(message);

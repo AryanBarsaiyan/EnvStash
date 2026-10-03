@@ -11,7 +11,16 @@ function openEnv(pid,eid){
   hideAddVar();
   renderVars();
   vsc.postMessage({type:'getVars',projectId:pid,envId:eid});
+  // the status bar shows whichever environment was opened last
+  vsc.postMessage({type:'setActiveEnv',projectId:pid,envId:eid});
   showScreen('env');
+}
+// The extension asked for an environment to be shown (status bar switcher)
+function openEnvFromHost(ref){
+  if(!findEnv(ref.projectId,ref.envId))return;
+  MODALS.forEach(close_);
+  openSet.add(ref.projectId);
+  openEnv(ref.projectId,ref.envId);
 }
 function updateEnvHdr(){
   if(!active)return;
@@ -34,6 +43,7 @@ function switchTab(t){
   G('copyBar').style.display  =t==='vars'    ?'flex':'none';
   const rb_=G('revBtn');
   rb_.style.display=t==='vars'?'flex':'none';
+  G('cmpBtn').style.display=t==='vars'?'flex':'none';
   if(t==='runbook') vsc.postMessage({type:'getRunbook',projectId:active.projectId,envId:active.envId});
   if(t!=='notes') flushNotes();
   else if(notesFor!==notesKeyOf(active)) {
@@ -102,15 +112,16 @@ function clearPaste(){G('pasteBox').value='';}
 // Revealed values hide themselves again after a while, and as soon as the panel is hidden
 const AUTO_HIDE_MS = typeof __INITIAL__ !== 'undefined' ? __INITIAL__.autoHideMs : 30000;
 let hideTimer = null;
+function anythingRevealed(){return revAll || cmpShowValues || Object.values(revealed).some(Boolean);}
 function hideSecrets(){
   clearTimeout(hideTimer);
-  if(!revAll && !Object.values(revealed).some(Boolean)) return;
-  revAll=false;revealed={};
-  if(active) renderVars();
+  if(!anythingRevealed()) return;
+  revAll=false;revealed={};cmpShowValues=false;
+  if(active){renderVars();renderCompare();}
 }
 function armAutoHide(){
   clearTimeout(hideTimer);
-  if(AUTO_HIDE_MS>0 && (revAll || Object.values(revealed).some(Boolean))) hideTimer=setTimeout(hideSecrets,AUTO_HIDE_MS);
+  if(AUTO_HIDE_MS>0 && anythingRevealed()) hideTimer=setTimeout(hideSecrets,AUTO_HIDE_MS);
 }
 document.addEventListener('visibilitychange',()=>{
   if(!document.hidden) return;

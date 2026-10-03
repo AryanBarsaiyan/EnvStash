@@ -141,6 +141,324 @@ describe('projects screen', () => {
   });
 });
 
+describe('duplicating an environment', () => {
+  async function withDev(t) {
+    const host = createHost();
+    const ids = await host.seed('api', 'dev', [['A', '1'], ['B', '2']]);
+    await host.send({ type: 'saveNotes', ...ids, notes: 'dev notes' });
+    const panel = newPanel(t, host);
+    await panel.click('.proj-row');
+    return { panel, host, ids };
+  }
+  const envNames = host => host.index().projects[0].envs.map(e => e.name);
+
+  test('the Duplicate button suggests a name and creates a full copy', async t => {
+    const { panel, host, ids } = await withDev(t);
+    await panel.click('.pill-btn[title="Duplicate"]');
+    assert.equal(panel.text('#envModalTitle'), 'Duplicate environment');
+    assert.equal(panel.$('#envName').value, 'dev copy');
+
+    await panel.type('#envName', 'staging');
+    await panel.click('#envModal .btn-primary');
+
+    assert.deepEqual(envNames(host), ['dev', 'staging']);
+    const copyId = host.index().projects[0].envs[1].id;
+    assert.deepEqual(host.vars(ids.projectId, copyId).map(v => [v.key, v.value]), [['A', '1'], ['B', '2']]);
+    assert.equal(host.notes(ids.projectId, copyId), 'dev notes');
+    assert.equal(panel.$$('.env-pill').length, 2);
+  });
+
+  test('the suggested name skips ones already taken', async t => {
+    const { panel, host, ids } = await withDev(t);
+    await host.send({ type: 'createEnv', projectId: ids.projectId, name: 'Dev Copy', color: '#fff' });
+    await panel.settle();
+    await panel.click('.pill-btn[title="Duplicate"]');
+    assert.equal(panel.$('#envName').value, 'dev copy 2');
+  });
+
+  test('the copy can be given its own colour, and the original keeps its own', async t => {
+    const { panel, host } = await withDev(t);
+    const original = host.index().projects[0].envs[0].color;
+    await panel.click('.pill-btn[title="Duplicate"]');
+    await panel.click(panel.$$('.swatch')[3]);
+    await panel.click('#envModal .btn-primary');
+    const [dev, copy] = host.index().projects[0].envs;
+    assert.equal(dev.color, original);
+    assert.equal(copy.color, '#569cd6');
+  });
+
+  test('cancelling creates nothing, and the dialog then works normally for a new environment', async t => {
+    const { panel, host } = await withDev(t);
+    await panel.click('.pill-btn[title="Duplicate"]');
+    await panel.click('#envModal .btn-ghost');
+    assert.deepEqual(envNames(host), ['dev']);
+
+    await panel.createEnv('fresh');
+    assert.deepEqual(envNames(host), ['dev', 'fresh']);
+    assert.deepEqual(host.vars(host.index().projects[0].id, host.index().projects[0].envs[1].id), [], 'a new environment is empty, not a copy');
+  });
+
+  test('the Duplicate button does not open the environment', async t => {
+    const { panel } = await withDev(t);
+    await panel.click('.pill-btn[title="Duplicate"]');
+    assert.ok(panel.$('#sProj').classList.contains('active'));
+  });
+});
+
+describe('comparing environments', () => {
+  async function devAndProd(t, { settings } = {}) {
+    const host = createHost({ settings });
+    const dev = await host.seed('api', 'dev', [['SAME', 'x'], ['CHANGED', 'dev-value'], ['DEV_ONLY', 'd']]);
+    await host.send({ type: 'createEnv', projectId: dev.projectId, name: 'prod', color: '#f48771' });
+    const prodId = host.index().projects[0].envs[1].id;
+    for (const [key, value] of [['SAME', 'x'], ['CHANGED', 'prod-value'], ['PROD_ONLY', 'p']]) {
+      await host.send({ type: 'saveVar', projectId: dev.projectId, envId: prodId, var: { key, value } });
+    }
+    const panel = newPanel(t, host);
+    await panel.click('.proj-row');
+    await panel.openEnv('dev');
+    return { panel, host, dev, prodId };
+  }
+  const rows = panel => panel.$$('.cmp-row').map(row => ({
+    key: row.querySelector('.var-key').textContent,
+    badge: row.querySelector('.cmp-badge').textContent,
+    values: [...row.querySelectorAll('.cmp-val')].map(v => [v.querySelector('.cmp-env').textContent, v.querySelector('.cmp-v').textContent]),
+    row,
+  }));
+  const MASK = '••••••••••';
+
+  test('shows what differs between this environment and another, values hidden', async t => {
+    const { panel } = await devAndProd(t);
+    await panel.click('#cmpBtn');
+
+    assert.ok(panel.$('#cmpModal').classList.contains('open'));
+    assert.equal(panel.text('#cmpThis'), 'dev');
+    assert.deepEqual(panel.$$('#cmpOther option').map(o => o.textContent), ['prod']);
+    assert.equal(panel.text('#cmpSummary'), '1 different · 1 only in dev · 1 only in prod · 1 identical');
+    assert.deepEqual(rows(panel).map(r => [r.key, r.badge, r.values]), [
+      ['CHANGED', 'Different', [['dev', MASK], ['prod', MASK]]],
+      ['DEV_ONLY', 'Only in dev', [['dev', MASK]]],
+      ['PROD_ONLY', 'Only in prod', [['prod', MASK]]],
+    ]);
+    assert.ok(!panel.$('#cmpModal').innerHTML.includes('prod-value'), 'hidden values are not in the page');
+  });
+
+  test('"Show values" reveals both sides and "Hide values" masks them again', async t => {
+    const { panel } = await devAndProd(t);
+    await panel.click('#cmpBtn');
+    await panel.click('#cmpShowBtn');
+    assert.deepEqual(rows(panel)[0].values, [['dev', 'dev-value'], ['prod', 'prod-value']]);
+    assert.equal(panel.text('#cmpShowBtn'), 'Hide values');
+    await panel.click('#cmpShowBtn');
+    assert.deepEqual(rows(panel)[0].values, [['dev', MASK], ['prod', MASK]]);
+  });
+
+  test('shown values hide themselves after the configured time and when the panel is hidden', async t => {
+    const { panel } = await devAndProd(t, { settings: { autoHideSeconds: 0.05 } });
+    await panel.click('#cmpBtn');
+    await panel.click('#cmpShowBtn');
+    await sleep(120);
+    assert.deepEqual(rows(panel)[0].values, [['dev', MASK], ['prod', MASK]]);
+
+    const other = await devAndProd(t);
+    await other.panel.click('#cmpBtn');
+    await other.panel.click('#cmpShowBtn');
+    await other.panel.setHidden(true);
+    assert.deepEqual(rows(other.panel)[0].values, [['dev', MASK], ['prod', MASK]]);
+  });
+
+  test('identical variables are folded away until asked for', async t => {
+    const { panel } = await devAndProd(t);
+    await panel.click('#cmpBtn');
+    assert.ok(!rows(panel).some(r => r.key === 'SAME'));
+    assert.equal(panel.text('.cmp-more'), 'Show 1 identical');
+    await panel.click('.cmp-more');
+    assert.deepEqual(rows(panel).find(r => r.key === 'SAME').badge, 'Same');
+    assert.equal(panel.text('.cmp-more'), 'Hide 1 identical');
+  });
+
+  test('"Add to dev" copies a missing variable into this environment only', async t => {
+    const { panel, host, dev, prodId } = await devAndProd(t);
+    await panel.click('#cmpBtn');
+    await panel.click(rows(panel).find(r => r.key === 'PROD_ONLY').row.querySelector('.cmp-add'));
+
+    assert.deepEqual(host.vars(dev.projectId, dev.envId).map(v => [v.key, v.value]),
+      [['SAME', 'x'], ['CHANGED', 'dev-value'], ['DEV_ONLY', 'd'], ['PROD_ONLY', 'p']]);
+    assert.equal(host.vars(dev.projectId, prodId).length, 3, 'the other environment is untouched');
+    assert.equal(panel.text('#cmpSummary'), '1 different · 1 only in dev · 2 identical');
+    assert.ok(!rows(panel).some(r => r.key === 'PROD_ONLY'));
+    assert.deepEqual(panel.varRows().map(r => r.key), ['SAME', 'CHANGED', 'DEV_ONLY', 'PROD_ONLY'], 'the list behind the dialog is updated too');
+  });
+
+  test('only variables missing here offer the copy button', async t => {
+    const { panel } = await devAndProd(t);
+    await panel.click('#cmpBtn');
+    assert.deepEqual(rows(panel).filter(r => r.row.querySelector('.cmp-add')).map(r => r.key), ['PROD_ONLY']);
+  });
+
+  test('says so when two environments are identical or both empty', async t => {
+    const host = createHost();
+    const ids = await host.seed('api', 'dev', [['A', '1']]);
+    await host.send({ type: 'duplicateEnv', ...ids, name: 'twin' });
+    await host.send({ type: 'createEnv', projectId: ids.projectId, name: 'empty', color: '#fff' });
+    await host.send({ type: 'createEnv', projectId: ids.projectId, name: 'empty too', color: '#fff' });
+    const panel = newPanel(t, host);
+    await panel.click('.proj-row');
+
+    await panel.openEnv('dev');
+    await panel.click('#cmpBtn');
+    assert.equal(panel.text('#cmpSummary'), 'Identical: all 1 variable match.');
+    assert.equal(rows(panel).length, 0);
+    await panel.click('#cmpModal .btn-primary');
+
+    await panel.click('.env-topbar .icon-btn');
+    await panel.openEnv('empty');
+    await panel.click('#cmpBtn');
+    panel.$('#cmpOther').value = String(panel.$$('#cmpOther option').findIndex(o => o.textContent === 'empty too'));
+    await panel.fire('#cmpOther', 'change');
+    assert.equal(panel.text('#cmpSummary'), 'Both environments have no variables.');
+  });
+
+  test('can switch target, including environments of other projects', async t => {
+    const { panel, host } = await devAndProd(t);
+    await host.seed('web', 'dev', [['SAME', 'x'], ['WEB_ONLY', 'w']]);
+    await panel.settle();
+    await panel.click('#cmpBtn');
+    assert.deepEqual(panel.$$('#cmpOther option').map(o => o.textContent), ['prod', 'web / dev'], 'same project first');
+
+    panel.$('#cmpOther').value = '1';
+    await panel.fire('#cmpOther', 'change');
+    assert.equal(panel.text('#cmpSummary'), '2 only in dev · 1 only in web / dev · 1 identical');
+    assert.deepEqual(rows(panel).map(r => r.key), ['CHANGED', 'DEV_ONLY', 'WEB_ONLY']);
+  });
+
+  test('with no other environment it explains instead of opening an empty dialog', async t => {
+    const { panel } = await inEnv(t, { vars: [['A', '1']] });
+    await panel.click('#cmpBtn');
+    assert.match(panel.text('#toast'), /Add another environment to compare with/);
+    assert.ok(!panel.$('#cmpModal').classList.contains('open'));
+  });
+
+  test('a late answer for a previous target is ignored', async t => {
+    const { panel, host, dev, prodId } = await devAndProd(t);
+    await panel.click('#cmpBtn');
+    host.view.webview.postMessage({ type: 'compare', ...dev, otherProjectId: 'someone', otherEnvId: 'else', data: [{ key: 'STALE', status: 'onlyLeft', left: '1' }] });
+    assert.ok(!rows(panel).some(r => r.key === 'STALE'));
+    host.view.webview.postMessage({ type: 'compare', projectId: 'other', envId: 'env', otherProjectId: dev.projectId, otherEnvId: prodId, data: [{ key: 'STALE', status: 'onlyLeft', left: '1' }] });
+    assert.ok(!rows(panel).some(r => r.key === 'STALE'));
+  });
+
+  test('the Compare button is only on the Variables tab, and Escape closes the dialog', async t => {
+    const { panel } = await devAndProd(t);
+    assert.ok(panel.visible('#cmpBtn'));
+    await panel.click('#tNotes');
+    assert.ok(!panel.visible('#cmpBtn'));
+    await panel.click('#tVars');
+    await panel.click('#cmpBtn');
+    panel.document.dispatchEvent(new panel.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    assert.ok(!panel.$('#cmpModal').classList.contains('open'));
+  });
+
+  test('hostile keys and values are shown as text', async t => {
+    const host = createHost();
+    const ids = await host.seed('api', 'dev');
+    await host.send({ type: 'createEnv', projectId: ids.projectId, name: '<b>prod</b>', color: '#fff' });
+    host.files.set(host.openPath, Buffer.from(JSON.stringify({ version: '1.0.0', projects: [{ id: ids.projectId, name: 'api', envs: [
+      { id: ids.envId, name: 'dev', color: '#fff', vars: [{ key: '<img src=x onerror=alert(1)>', value: '<script>alert(1)</script>' }], runbook: { stages: [] } },
+    ] }] })));
+    await host.send({ type: 'importFile', merge: true });
+    const panel = newPanel(t, host);
+    await panel.click('.proj-row');
+    await panel.openEnv('dev');
+    await panel.click('#cmpBtn');
+    await panel.click('#cmpShowBtn');
+
+    assert.equal(rows(panel)[0].key, '<img src=x onerror=alert(1)>');
+    assert.deepEqual(rows(panel)[0].values, [['dev', '<script>alert(1)</script>']]);
+    assert.equal(panel.$('#cmpModal img, #cmpModal script, #cmpModal b'), null);
+    assert.equal(panel.$('#cmpOther option').textContent, '<b>prod</b>');
+  });
+});
+
+describe('status bar and the panel', () => {
+  test('opening an environment in the panel updates the status bar', async t => {
+    const host = createHost();
+    await host.seed('api', 'dev');
+    const panel = newPanel(t, host);
+    assert.equal(host.statusBar().text, '$(lock) EnvStash');
+    await panel.click('.proj-row');
+    await panel.openEnv('dev');
+    assert.equal(host.statusBar().text, '$(lock) api / dev');
+  });
+
+  test('going back to the project list keeps the last environment in the status bar', async t => {
+    const { panel, host } = await inEnv(t);
+    await panel.click('.env-topbar .icon-btn');
+    assert.equal(host.statusBar().text, '$(lock) api / dev');
+  });
+
+  test('picking from the status bar opens that environment in the open panel', async t => {
+    const host = createHost();
+    await host.seed('api', 'dev', [['DEV_KEY', '1']]);
+    await host.seed('web', 'prod', [['PROD_KEY', '2']]);
+    const panel = newPanel(t, host);
+    await panel.click('.proj-row');
+    await panel.openEnv('dev');
+    await panel.click('#tNotes');
+    await panel.type('#notesArea', 'unsaved dev note');
+
+    host.pick = items => items.find(i => i.label === 'prod');
+    await host.command('envstash.switchEnvironment');
+    await panel.settle();
+
+    assert.ok(panel.$('#sEnv').classList.contains('active'));
+    assert.equal(panel.text('#envTitle'), 'prod');
+    assert.deepEqual(panel.varRows().map(r => r.key), ['PROD_KEY']);
+    assert.equal(host.statusBar().text, '$(lock) web / prod');
+    const dev = host.index().projects[0];
+    assert.equal(host.notes(dev.id, dev.envs[0].id), 'unsaved dev note', 'notes being typed are saved before switching');
+  });
+
+  test('switching from the status bar closes any open dialog first', async t => {
+    const host = createHost();
+    await host.seed('api', 'dev');
+    const panel = newPanel(t, host);
+    await panel.click('#projList .dashed-btn');
+    assert.ok(panel.$('#projModal').classList.contains('open'));
+
+    host.pick = items => items[0];
+    await host.command('envstash.switchEnvironment');
+    await panel.settle();
+    assert.ok(!panel.$('#projModal').classList.contains('open'));
+    assert.equal(panel.text('#envTitle'), 'dev');
+  });
+
+  test('a panel first opened by a status bar pick starts inside that environment', async t => {
+    const seeded = createHost();
+    await seeded.seed('api', 'dev', [['A', '1']]);
+    t.after(() => seeded.close());
+    const host = createHost({ panelClosed: true });
+    host.globalState.set('envstash_index', seeded.globalState.get('envstash_index'));
+    for (const [k, v] of seeded.secrets) host.secrets.set(k, v);
+    host.pick = items => items[0];
+    await host.command('envstash.switchEnvironment');
+
+    const panel = newPanel(t, host);
+    await panel.settle();
+    assert.ok(panel.$('#sEnv').classList.contains('active'));
+    assert.equal(panel.text('#envTitle'), 'dev');
+    assert.deepEqual(panel.varRows().map(r => r.key), ['A']);
+  });
+
+  test('a request to open an environment that no longer exists is ignored', async t => {
+    const host = createHost();
+    await host.seed('api', 'dev');
+    const panel = newPanel(t, host);
+    host.view.webview.postMessage({ type: 'openEnv', projectId: 'gone', envId: 'gone' });
+    assert.ok(panel.$('#sProj').classList.contains('active'));
+  });
+});
+
 describe('names are data, never code', () => {
   const NASTY = `it's "x" \\ <img src=x onerror=alert(1)> ');alert(1);('`;
 

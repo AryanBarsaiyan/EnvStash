@@ -8,6 +8,9 @@ All notable changes to the **EnvStash** extension will be documented in this fil
 - **Encrypted backups**: exports can be protected with a passphrase (scrypt + AES-256-GCM). Existing plain JSON backups still import.
 - Copied variable values are **cleared from the clipboard** after `envstash.clipboardClearSeconds` (default 30).
 - Revealed variable values **hide themselves** after `envstash.autoHideSeconds` (default 30) and whenever the panel is hidden.
+- **Status bar environment switcher**: the status bar shows the environment last opened in this workspace; click it (or run `EnvStash: Switch Environment`) to pick another and open it in the panel.
+- **Compare environments**: see which variables differ, or exist on only one side, between the open environment and any other, and copy missing ones across.
+- **Duplicate an environment** with its variables, runbook and notes.
 - **Edit a variable in place**: change its value or rename its key without deleting and re-adding it.
 - **Reorder commands inside a runbook stage** by dragging the handle on each command.
 - Redesigned **Notes** tab: icon toolbar, checklists, quotes, numbered and nested lists, word count.

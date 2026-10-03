@@ -104,6 +104,229 @@ describe('environments', () => {
   });
 });
 
+describe('duplicating an environment', () => {
+  async function source(t) {
+    const host = newHost(t);
+    const ids = await host.seed('api', 'dev', [['A', '1'], ['B', 'two\nlines']]);
+    await host.send({ type: 'saveNotes', ...ids, notes: 'dev notes' });
+    await host.send({ type: 'saveRunbook', ...ids, data: { stages: [
+      { id: 's1', name: 'Start', commands: [{ id: 'c1', label: 'Run', cmd: 'npm start' }] },
+    ] } });
+    return { host, ids };
+  }
+  const envs = host => host.index().projects[0].envs;
+
+  test('copies variables, runbook and notes into a new environment', async t => {
+    const { host, ids } = await source(t);
+    await host.send({ type: 'duplicateEnv', ...ids, name: ' staging ', color: '#f48771' });
+
+    const copy = envs(host)[1];
+    assert.deepEqual([copy.name, copy.color], ['staging', '#f48771']);
+    assert.notEqual(copy.id, ids.envId);
+    assert.deepEqual(host.vars(ids.projectId, copy.id).map(v => [v.key, v.value]), [['A', '1'], ['B', 'two\nlines']]);
+    assert.equal(host.notes(ids.projectId, copy.id), 'dev notes');
+    assert.deepEqual(host.runbook(ids.projectId, copy.id).stages.map(s => [s.name, s.commands.map(c => c.cmd)]), [['Start', ['npm start']]]);
+    assert.deepEqual(host.lastPosted('index').data, host.index());
+  });
+
+  test('the copy is independent: it shares no ids and editing it leaves the original alone', async t => {
+    const { host, ids } = await source(t);
+    await host.send({ type: 'duplicateEnv', ...ids, name: 'staging' });
+    const copyId = envs(host)[1].id;
+
+    const originalIds = [...host.vars(ids.projectId, ids.envId).map(v => v.id), 's1', 'c1'];
+    const copyRunbook = host.runbook(ids.projectId, copyId);
+    const copyIds = [...host.vars(ids.projectId, copyId).map(v => v.id), copyRunbook.stages[0].id, copyRunbook.stages[0].commands[0].id];
+    assert.deepEqual(copyIds.filter(id => originalIds.includes(id)), []);
+
+    const a = host.vars(ids.projectId, copyId)[0];
+    await host.send({ type: 'saveVar', projectId: ids.projectId, envId: copyId, var: { id: a.id, key: 'A', value: 'changed' } });
+    await host.send({ type: 'saveNotes', projectId: ids.projectId, envId: copyId, notes: 'staging notes' });
+    assert.equal(host.vars(ids.projectId, ids.envId)[0].value, '1');
+    assert.equal(host.notes(ids.projectId, ids.envId), 'dev notes');
+  });
+
+  test('keeps the original colour when none is given and sits right after the original', async t => {
+    const { host, ids } = await source(t);
+    await host.send({ type: 'createEnv', projectId: ids.projectId, name: 'prod', color: '#fff' });
+    await host.send({ type: 'duplicateEnv', ...ids, name: 'dev 2' });
+    assert.deepEqual(envs(host).map(e => e.name), ['dev', 'dev 2', 'prod']);
+    assert.equal(envs(host)[1].color, envs(host)[0].color);
+  });
+
+  test('an empty environment duplicates to an empty one without writing empty secrets', async t => {
+    const host = newHost(t);
+    const ids = await host.seed('api', 'dev');
+    await host.send({ type: 'duplicateEnv', ...ids, name: 'copy' });
+    assert.equal(envs(host).length, 2);
+    assert.equal(host.secrets.size, 0);
+  });
+
+  test('rejects a taken or empty name, an unknown project and an unknown environment', async t => {
+    const { host, ids } = await source(t);
+    await host.send({ type: 'duplicateEnv', ...ids, name: 'DEV' });
+    await host.send({ type: 'duplicateEnv', ...ids, name: '  ' });
+    await host.send({ type: 'duplicateEnv', projectId: 'nope', envId: ids.envId, name: 'x' });
+    await host.send({ type: 'duplicateEnv', projectId: ids.projectId, envId: 'nope', name: 'x' });
+    assert.deepEqual(host.errors, [
+      'EnvStash error: Environment "DEV" already exists in this project',
+      'EnvStash error: Environment name cannot be empty',
+      'EnvStash error: Project not found',
+      'EnvStash error: Environment not found',
+    ]);
+    assert.equal(envs(host).length, 1);
+  });
+});
+
+describe('comparing environments', () => {
+  test('returns the differences between two environments, keyed to the request', async t => {
+    const host = newHost(t);
+    const dev = await host.seed('api', 'dev', [['SAME', 'x'], ['CHANGED', 'dev'], ['DEV_ONLY', 'd']]);
+    await host.send({ type: 'createEnv', projectId: dev.projectId, name: 'prod', color: '#fff' });
+    const prodId = host.index().projects[0].envs[1].id;
+    for (const [key, value] of [['SAME', 'x'], ['CHANGED', 'prod'], ['PROD_ONLY', 'p']]) {
+      await host.send({ type: 'saveVar', projectId: dev.projectId, envId: prodId, var: { key, value } });
+    }
+
+    await host.send({ type: 'compareEnvs', ...dev, otherProjectId: dev.projectId, otherEnvId: prodId });
+
+    assert.deepEqual(host.lastPosted('compare'), {
+      type: 'compare', ...dev, otherProjectId: dev.projectId, otherEnvId: prodId,
+      data: [
+        { key: 'SAME', status: 'same', left: 'x', right: 'x' },
+        { key: 'CHANGED', status: 'different', left: 'dev', right: 'prod' },
+        { key: 'DEV_ONLY', status: 'onlyLeft', left: 'd' },
+        { key: 'PROD_ONLY', status: 'onlyRight', right: 'p' },
+      ],
+    });
+  });
+
+  test('can compare across projects, and comparing changes nothing', async t => {
+    const host = newHost(t);
+    const a = await host.seed('one', 'dev', [['A', '1']]);
+    const b = await host.seed('two', 'dev', [['A', '2']]);
+    const before = JSON.stringify([...host.secrets.entries()]);
+    await host.send({ type: 'compareEnvs', ...a, otherProjectId: b.projectId, otherEnvId: b.envId });
+    assert.deepEqual(host.lastPosted('compare').data, [{ key: 'A', status: 'different', left: '1', right: '2' }]);
+    assert.equal(JSON.stringify([...host.secrets.entries()]), before);
+  });
+});
+
+describe('status bar environment switcher', () => {
+  const SWITCH = 'envstash.switchEnvironment';
+
+  test('shows a neutral label until an environment is chosen, and is clickable', t => {
+    const host = newHost(t);
+    const bar = host.statusBar();
+    assert.equal(bar.text, '$(lock) EnvStash');
+    assert.equal(bar.command, SWITCH);
+    assert.ok(bar.visible);
+  });
+
+  test('opening an environment in the panel makes it the active one', async t => {
+    const host = newHost(t);
+    const ids = await host.seed('api', 'dev');
+    await host.send({ type: 'setActiveEnv', ...ids });
+    assert.equal(host.statusBar().text, '$(lock) api / dev');
+    assert.match(host.statusBar().tooltip, /dev \(api\)/);
+  });
+
+  test('the label follows renames and falls back when the environment is deleted', async t => {
+    const host = newHost(t);
+    const ids = await host.seed('api', 'dev');
+    await host.send({ type: 'setActiveEnv', ...ids });
+
+    await host.send({ type: 'renameEnv', ...ids, name: 'development' });
+    assert.equal(host.statusBar().text, '$(lock) api / development');
+    await host.send({ type: 'renameProject', projectId: ids.projectId, name: 'backend' });
+    assert.equal(host.statusBar().text, '$(lock) backend / development');
+
+    await host.send({ type: 'deleteEnv', ...ids });
+    assert.equal(host.statusBar().text, '$(lock) EnvStash');
+  });
+
+  test('falls back when the whole project is deleted or replaced by an import', async t => {
+    const host = newHost(t);
+    const ids = await host.seed('api', 'dev');
+    await host.send({ type: 'setActiveEnv', ...ids });
+    await host.send({ type: 'deleteProject', projectId: ids.projectId });
+    assert.equal(host.statusBar().text, '$(lock) EnvStash');
+
+    host.files.set(host.openPath, Buffer.from(JSON.stringify({ version: '1.0.0', projects: [
+      { id: ids.projectId, name: 'restored', envs: [{ id: ids.envId, name: 'dev', color: '#fff', vars: [], runbook: { stages: [] } }] },
+    ] })));
+    await host.send({ type: 'importFile', merge: true });
+    assert.equal(host.statusBar().text, '$(lock) restored / dev', 'refreshed after an import too');
+  });
+
+  test('the choice is remembered per workspace, not globally', async t => {
+    const host = newHost(t);
+    const ids = await host.seed('api', 'dev');
+    await host.send({ type: 'setActiveEnv', ...ids });
+    assert.deepEqual([...host.workspaceState.values()], [ids]);
+    assert.ok(![...host.globalState.values()].some(v => String(v).includes('active')));
+  });
+
+  test('the switch command lists every environment, marks the current one, and opens the choice in the panel', async t => {
+    const host = newHost(t);
+    const dev = await host.seed('api', 'dev');
+    const web = await host.seed('web', 'prod');
+    await host.send({ type: 'setActiveEnv', ...dev });
+    host.pick = items => items.find(i => i.label === 'prod');
+
+    await host.command(SWITCH);
+
+    assert.deepEqual(host.quickPicks[0].map(i => [i.label, i.description]), [['dev', 'api  ·  current'], ['prod', 'web']]);
+    assert.equal(host.statusBar().text, '$(lock) web / prod');
+    assert.deepEqual(host.lastPosted('openEnv'), { type: 'openEnv', ...web });
+    assert.deepEqual(host.executed, ['envstash.panel.focus']);
+  });
+
+  test('dismissing the picker changes nothing', async t => {
+    const host = newHost(t);
+    const dev = await host.seed('api', 'dev');
+    await host.send({ type: 'setActiveEnv', ...dev });
+    await host.command(SWITCH);
+    assert.equal(host.statusBar().text, '$(lock) api / dev');
+    assert.equal(host.lastPosted('openEnv'), undefined);
+    assert.deepEqual(host.executed, []);
+  });
+
+  test('with no environments it says so and shows the panel instead of an empty picker', async t => {
+    const host = newHost(t);
+    await host.command(SWITCH);
+    assert.equal(host.quickPicks.length, 0);
+    assert.match(host.info.at(-1), /no environments yet/);
+    assert.deepEqual(host.executed, ['envstash.panel.focus']);
+  });
+
+  test('picking before the panel was ever opened makes the page start in that environment', async t => {
+    const seeded = newHost(t);
+    const ids = await seeded.seed('api', 'dev');
+    const host = newHost(t, { panelClosed: true });
+    host.globalState.set('envstash_index', seeded.globalState.get('envstash_index'));
+    host.pick = items => items[0];
+
+    await host.command(SWITCH);
+    assert.equal(host.posted.length, 0, 'there is no page to message yet');
+    assert.deepEqual(host.executed, ['envstash.panel.focus']);
+
+    const startData = html => JSON.parse(/const __INITIAL__ = (.*);/.exec(html)[1]);
+    assert.deepEqual(startData(host.html()).open, ids);
+    assert.equal(startData(host.html()).open, undefined, 'only the first load after the pick, not every later one');
+  });
+
+  test('after the panel is closed, a pick is held for the next time it opens', async t => {
+    const host = newHost(t);
+    const ids = await host.seed('api', 'dev');
+    host.view.dispose();
+    host.pick = items => items[0];
+    await host.command(SWITCH);
+    assert.equal(host.lastPosted('openEnv'), undefined, 'nothing is sent to a page that no longer exists');
+    assert.deepEqual(JSON.parse(/const __INITIAL__ = (.*);/.exec(host.html())[1]).open, ids);
+  });
+});
+
 describe('variables', () => {
   test('adds, updates and deletes a variable', async t => {
     const host = newHost(t);

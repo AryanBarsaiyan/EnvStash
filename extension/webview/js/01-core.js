@@ -57,6 +57,8 @@ window.addEventListener('message', e => {
   if (m.type==='vars' && active && m.projectId===active.projectId && m.envId===active.envId) {
     vars=m.data; renderVars();
   }
+  if (m.type==='openEnv') openEnvFromHost(m);
+  if (m.type==='compare') onCompareResult(m);
   if (m.type==='runbook' && active && m.projectId===active.projectId && m.envId===active.envId) {
     rb=m.data||{stages:[]}; renderRb();
   }

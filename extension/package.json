@@ -46,6 +46,10 @@
         "title": "EnvStash: Open Panel"
       },
       {
+        "command": "envstash.switchEnvironment",
+        "title": "EnvStash: Switch Environment"
+      },
+      {
         "command": "envstash.exportAll",
         "title": "EnvStash: Export All Data"
       },

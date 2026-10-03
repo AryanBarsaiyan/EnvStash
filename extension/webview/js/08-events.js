@@ -4,7 +4,8 @@ const ACTIONS = {
   act, goBack, switchTab, toggleRevealAll, toggleRev, copyVar, editVar, delVar, showAddVar, hideAddVar, saveNewVar,
   copyAll, doImport, clearPaste,
   toggleProj, openNewProj, openEditProj, askDelProj, saveProjModal,
-  openEnv, openNewEnv, openEditEnv, askDelEnv, saveEnvModal, pickColor,
+  openEnv, openNewEnv, openEditEnv, openDupEnv, askDelEnv, saveEnvModal, pickColor,
+  openCompare, toggleCompareValues, toggleCompareSame, cmpCopyHere,
   toggleStage, openNewStg, openEditStg, askDelStg, saveStageModal,
   openNewCmd, openEditCmd, askDelCmd, saveCmdModal, copyCmd, runCmd, runAll,
   setNotesMode, notesWrap, notesLinePrefix, notesCode, notesLink,
@@ -23,6 +24,7 @@ document.addEventListener('click', e => {
 G('varSearch').addEventListener('input', filterVars);
 G('isMulti').addEventListener('change', toggleMultiVal);
 G('notesArea').addEventListener('input', onNotesInput);
+G('cmpOther').addEventListener('change', onCompareTargetChange);
 
 // Stage drag-and-drop, delegated from the list to each .stage-hd
 [['dragstart', dragStartStage], ['dragover', dragOverStage], ['dragleave', dragLeaveStage],
@@ -42,3 +44,7 @@ G('notesArea').addEventListener('input', onNotesInput);
     handler(e, row, Number(row.dataset.si), Number(row.dataset.ci));
   });
 });
+
+// Opened from the status bar before the panel existed: go straight to that environment.
+// Last in the file on purpose, so every piece of state it touches is already defined.
+if (typeof __INITIAL__ !== 'undefined' && __INITIAL__.open) openEnvFromHost(__INITIAL__.open);
