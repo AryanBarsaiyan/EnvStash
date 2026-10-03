@@ -2,7 +2,10 @@
 const vsc = acquireVsCodeApi();
 const G   = id => document.getElementById(id);
 const ESC = s => (s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-const EQ  = s => (s??'').replace(/\\\\/g,'\\\\\\\\').replace(/'/g,"\\\\'").replace(/"/g,'&quot;');
+const ATTR= s => ESC(String(s??'')).replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+// Click wiring for generated markup: handled by the delegated listener in "Event wiring"
+const ON  = (name,...args) => `data-act="${name}"` + (args.length ? ` data-args="${ATTR(JSON.stringify(args))}"` : '');
+const COLOR = c => /^#[0-9a-fA-F]{3,8}$/.test(c||'') ? c : '#4ec994';
 
 /* ── SVG icon refs (inlined by template) ── */
 /* Icons come from the HTML literals above — no runtime refs needed */
@@ -34,8 +37,8 @@ let confCb=null;
 let menuOpen=false;
 
 /* ── Boot ── */
-if (typeof __INITIAL_INDEX__ !== 'undefined') {
-  idx = __INITIAL_INDEX__;
+if (typeof __INITIAL__ !== 'undefined') {
+  idx = __INITIAL__.index;
   renderProjs();
 } else {
   vsc.postMessage({type:'getIndex'});
@@ -43,7 +46,14 @@ if (typeof __INITIAL_INDEX__ !== 'undefined') {
 
 window.addEventListener('message', e => {
   const m=e.data;
-  if (m.type==='index')   { idx=m.data; renderProjs(); }
+  if (m.type==='index')   {
+    idx=m.data; renderProjs();
+    // a backup import may have replaced the open env's notes
+    if (active && !notesTimeout) {
+      if (activeTab==='notes') vsc.postMessage({type:'getNotes',projectId:active.projectId,envId:active.envId});
+      else notesFor=null;
+    }
+  }
   if (m.type==='vars' && active && m.projectId===active.projectId && m.envId===active.envId) {
     vars=m.data; renderVars();
   }
@@ -51,11 +61,16 @@ window.addEventListener('message', e => {
     rb=m.data||{stages:[]}; renderRb();
   }
   if (m.type==='notes' && active && m.projectId===active.projectId && m.envId===active.envId) {
-    G('notesArea').value = m.data || '';
-    G('notesStatus').textContent = 'All changes saved automatically';
-    if (notesMode === 'preview') {
-      G('notesPreview').innerHTML = renderMarkdown(m.data || '');
-    }
+    if (notesTimeout) return; // unsaved local edits are newer than this reply
+    const data = m.data || '', el = G('notesArea');
+    const first = notesFor !== notesKeyOf(active);
+    if (el.value !== data) el.value = data;
+    el.readOnly = false;
+    notesFor = notesKeyOf(active);
+    updateNotesCount();
+    setNotesStatus('Saved');
+    if (first) setNotesMode(data.trim() ? 'preview' : 'edit');
+    else if (notesMode === 'preview') G('notesPreview').innerHTML = renderMarkdown(data);
   }
 });
 
@@ -65,7 +80,7 @@ function showScreen(s){
   G('sEnv').classList.toggle('active', s==='env');
 }
 function goBack(){
-  clearTimeout(notesTimeout);
+  flushNotes();notesFor=null;clearTimeout(hideTimer);
   active=null;vars=[];rb={stages:[]};revealed={};revAll=false;expandedStages=new Set();
   renderProjs(); showScreen('proj');
 }
@@ -80,51 +95,53 @@ function renderProjs(){
       <div class="empty-h">No projects yet</div>
       <div class="empty-p">Create a project to securely store environment variables and runbooks.</div>
     </div>
-    <button class="dashed-btn" onclick="openNewProj()">${SVG.plus} Create project</button>`;
+    <button class="dashed-btn" ${ON('openNewProj')}>${SVG.plus} Create project</button>`;
     return;
   }
   let h='';
   for(const p of idx.projects){
     const open=openSet.has(p.id);
     h+=`<div class="proj-card">
-      <div class="proj-row" onclick="toggleProj('${p.id}')">
+      <div class="proj-row" ${ON('toggleProj',p.id)}>
         <span class="proj-chevron ${open?'open':''}">${SVG.chevron}</span>
         <span class="proj-icon">${SVG.folder}</span>
         <span class="proj-name">${ESC(p.name)}</span>
-        <div class="proj-acts" onclick="event.stopPropagation()">
-          <button class="row-btn" title="Export project" onclick="act('exportProject',{projectId:'${p.id}'})">${SVG.upload}</button>
-          <button class="row-btn" title="Rename" onclick="openEditProj('${p.id}','${EQ(p.name)}')">${SVG.edit}</button>
-          <button class="row-btn danger" title="Delete" onclick="askDelProj('${p.id}','${EQ(p.name)}')">${SVG.trash}</button>
+        <div class="proj-acts" data-stop>
+          <button class="row-btn" title="Export project" ${ON('act','exportProject',{projectId:p.id})}>${SVG.upload}</button>
+          <button class="row-btn" title="Rename" ${ON('openEditProj',p.id)}>${SVG.edit}</button>
+          <button class="row-btn danger" title="Delete" ${ON('askDelProj',p.id)}>${SVG.trash}</button>
         </div>
       </div>
       <div class="env-area ${open?'open':''}">
         <div class="env-pills">
           ${p.envs.map(e=>{
-            const c=e.color||'#4ec994';
+            const c=COLOR(e.color);
             return `<span class="env-pill ${active&&active.envId===e.id?'sel':''}"
               style="background:${c}20;color:${c};border-color:${c}50"
-              onclick="openEnv('${p.id}','${e.id}','${EQ(e.name)}','${c}')">
+              ${ON('openEnv',p.id,e.id)}>
               ${ESC(e.name)}
-              <span class="pill-acts" onclick="event.stopPropagation()">
-                <button class="pill-btn" title="Edit" onclick="openEditEnv('${p.id}','${e.id}','${EQ(e.name)}','${c}')">${SVG.editSm}</button>
-                <button class="pill-btn" title="Delete" onclick="askDelEnv('${p.id}','${e.id}','${EQ(e.name)}')">${SVG.xSm}</button>
+              <span class="pill-acts" data-stop>
+                <button class="pill-btn" title="Edit" ${ON('openEditEnv',p.id,e.id)}>${SVG.editSm}</button>
+                <button class="pill-btn" title="Delete" ${ON('askDelEnv',p.id,e.id)}>${SVG.xSm}</button>
               </span>
             </span>`;
           }).join('')}
-          <button class="add-env-btn" onclick="openNewEnv('${p.id}')">${SVG.plusSm} Add env</button>
+          <button class="add-env-btn" ${ON('openNewEnv',p.id)}>${SVG.plusSm} Add env</button>
         </div>
       </div>
     </div>`;
   }
-  h+=`<button class="dashed-btn" onclick="openNewProj()">${SVG.plus} Create project</button>`;
+  h+=`<button class="dashed-btn" ${ON('openNewProj')}>${SVG.plus} Create project</button>`;
   el.innerHTML=h;
 }
 
+function findProj(id){return idx.projects.find(p=>p.id===id);}
+function findEnv(pid,eid){return findProj(pid)?.envs.find(e=>e.id===eid);}
 function toggleProj(id){openSet.has(id)?openSet.delete(id):openSet.add(id);renderProjs();}
 
 /* ── Project modal ── */
 function openNewProj(){projMode='create';projId=null;G('projModalTitle').textContent='New project';G('projName').value='';open_('projModal');setTimeout(()=>G('projName').focus(),60);}
-function openEditProj(id,n){projMode='rename';projId=id;G('projModalTitle').textContent='Rename project';G('projName').value=n;open_('projModal');setTimeout(()=>G('projName').focus(),60);}
+function openEditProj(id){projMode='rename';projId=id;G('projModalTitle').textContent='Rename project';G('projName').value=findProj(id)?.name??'';open_('projModal');setTimeout(()=>G('projName').focus(),60);}
 function saveProjModal(){
   const n=G('projName').value.trim();
   if(!n){toast('Project name cannot be empty','err');G('projName').focus();return;}
@@ -134,13 +151,13 @@ function saveProjModal(){
 }
 
 /* ── Delete confirms ── */
-function askDelProj(id,n){G('confTitle').textContent='Delete project';G('confMsg').textContent='Delete "'+n+'"?';G('confSub').textContent='All environments, variables and runbooks will be permanently deleted.';confCb=()=>{openSet.delete(id);vsc.postMessage({type:'deleteProject',projectId:id});};open_('confModal');}
-function askDelEnv(pid,eid,n){G('confTitle').textContent='Delete environment';G('confMsg').textContent='Delete "'+n+'"?';G('confSub').textContent='All variables and the runbook for this environment will be permanently deleted.';confCb=()=>{if(active&&active.envId===eid)goBack();vsc.postMessage({type:'deleteEnv',projectId:pid,envId:eid});};open_('confModal');}
+function askDelProj(id){const n=findProj(id)?.name??'';G('confTitle').textContent='Delete project';G('confMsg').textContent='Delete "'+n+'"?';G('confSub').textContent='All environments, variables and runbooks will be permanently deleted.';confCb=()=>{openSet.delete(id);vsc.postMessage({type:'deleteProject',projectId:id});};open_('confModal');}
+function askDelEnv(pid,eid){const n=findEnv(pid,eid)?.name??'';G('confTitle').textContent='Delete environment';G('confMsg').textContent='Delete "'+n+'"?';G('confSub').textContent='All variables and the runbook for this environment will be permanently deleted.';confCb=()=>{if(active&&active.envId===eid)goBack();vsc.postMessage({type:'deleteEnv',projectId:pid,envId:eid});};open_('confModal');}
 function doConfirm(){if(confCb){confCb();confCb=null;}close_('confModal');}
 
 /* ── Env modal ── */
 function buildSwatches(){
-  G('swatches').innerHTML=PALETTE.map(c=>`<div class="swatch ${c===selColor?'sel':''}" style="background:${c}" onclick="pickColor('${c}')"></div>`).join('');
+  G('swatches').innerHTML=PALETTE.map(c=>`<div class="swatch ${c===selColor?'sel':''}" style="background:${c}" ${ON('pickColor',c)}></div>`).join('');
   G('colorPick').value=selColor;refreshPill();
 }
 function pickColor(c){selColor=c;buildSwatches();}
@@ -149,7 +166,7 @@ G('envName').addEventListener('input',refreshPill);
 function refreshPill(){const n=G('envName').value.trim()||'env';const p=G('pillPrev');p.textContent=n;p.style.color=selColor;p.style.background=selColor+'20';p.style.borderColor=selColor+'50';}
 
 function openNewEnv(pid){envMode='create';envPid=pid;envEid=null;selColor='#4ec994';G('envModalTitle').textContent='New environment';G('envName').value='';buildSwatches();open_('envModal');setTimeout(()=>G('envName').focus(),60);}
-function openEditEnv(pid,eid,n,c){envMode='rename';envPid=pid;envEid=eid;selColor=c||'#4ec994';G('envModalTitle').textContent='Edit environment';G('envName').value=n;buildSwatches();open_('envModal');setTimeout(()=>G('envName').focus(),60);}
+function openEditEnv(pid,eid){const env=findEnv(pid,eid);envMode='rename';envPid=pid;envEid=eid;selColor=COLOR(env?.color);G('envModalTitle').textContent='Edit environment';G('envName').value=env?.name??'';buildSwatches();open_('envModal');setTimeout(()=>G('envName').focus(),60);}
 function saveEnvModal(){
   const n=G('envName').value.trim();
   if(!n){toast('Environment name cannot be empty','err');G('envName').focus();return;}
@@ -166,9 +183,11 @@ function close_(id){G(id).classList.remove('open');}
 });
 
 /* ── Env screen ── */
-function openEnv(pid,eid,name,color){
-  clearTimeout(notesTimeout);
-  active={projectId:pid,envId:eid,name,color};
+function openEnv(pid,eid){
+  const env=findEnv(pid,eid);
+  if(!env)return;
+  flushNotes();notesFor=null;
+  active={projectId:pid,envId:eid,name:env.name,color:COLOR(env.color)};
   vars=[];rb={stages:[]};revealed={};revAll=false;expandedStages=new Set();
   G('varSearch').value='';
   updateEnvHdr();switchTab('vars');
@@ -183,7 +202,7 @@ function updateEnvHdr(){
   const p=idx.projects.find(p=>p.id===active.projectId);
   G('envDot').style.background=active.color||'#4ec994';
   G('envTitle').textContent=active.name;
-  G('bc').innerHTML=`<span class="bc-link" onclick="goBack()">${ESC(p?p.name:'Projects')}</span><span class="bc-sep">›</span><span class="bc-cur">${ESC(active.name)}</span>`;
+  G('bc').innerHTML=`<span class="bc-link" ${ON('goBack')}>${ESC(p?p.name:'Projects')}</span><span class="bc-sep">›</span><span class="bc-cur">${ESC(active.name)}</span>`;
 }
 
 function switchTab(t){
@@ -200,9 +219,13 @@ function switchTab(t){
   const rb_=G('revBtn');
   rb_.style.display=t==='vars'?'flex':'none';
   if(t==='runbook') vsc.postMessage({type:'getRunbook',projectId:active.projectId,envId:active.envId});
-  if(t==='notes') {
+  if(t!=='notes') flushNotes();
+  else if(notesFor!==notesKeyOf(active)) {
+    // read-only until the stored notes arrive, so typing can't overwrite them
     G('notesArea').value = '';
-    G('notesStatus').textContent = 'Loading notes...';
+    G('notesArea').readOnly = true;
+    updateNotesCount();
+    setNotesStatus('Loading…', true);
     vsc.postMessage({type:'getNotes',projectId:active.projectId,envId:active.envId});
   }
 }
@@ -224,7 +247,7 @@ function renderVars(){
       <div class="empty-h">No variables yet</div>
       <div class="empty-p">Click + to add one, or use the Import tab.</div>
     </div>`;
-    list.innerHTML+=`<div class="add-var-row" onclick="showAddVar()">${SVG.plus}&nbsp; Add variable</div>`;
+    list.innerHTML+=`<div class="add-var-row" ${ON('showAddVar')}>${SVG.plus}&nbsp; Add variable</div>`;
     return;
   }
 
@@ -243,20 +266,36 @@ function renderVars(){
     return `<div class="var-row">
       <span class="var-key">${ESC(v.key)}</span>
       <span class="var-val ${show?'shown':''}">${show?ESC(v.value):'••••••••••'}</span>
-      <button class="vbtn" title="${show?'Hide':'Reveal'}" onclick="toggleRev('${v.id}')">${show?'${SVG.eyeOff}':'${SVG.eye}'}</button>
-      <button class="vbtn" title="Copy export" onclick="copyVar('${v.id}')">${SVG.copy}</button>
-      <button class="vbtn danger" title="Delete" onclick="delVar('${v.id}')">${SVG.trash}</button>
+      <button class="vbtn" title="${show?'Hide':'Reveal'}" ${ON('toggleRev',v.id)}>${show?'${SVG.eyeOff}':'${SVG.eye}'}</button>
+      <button class="vbtn" title="Copy export" ${ON('copyVar',v.id)}>${SVG.copy}</button>
+      <button class="vbtn danger" title="Delete" ${ON('delVar',v.id)}>${SVG.trash}</button>
     </div>`;
   }).join('');
-  list.innerHTML+=`<div class="add-var-row" onclick="showAddVar()">${SVG.plus}&nbsp; Add variable</div>`;
+  list.innerHTML+=`<div class="add-var-row" ${ON('showAddVar')}>${SVG.plus}&nbsp; Add variable</div>`;
 }
 
 function filterVars(){
   renderVars();
 }
 
-function toggleRevealAll(){revAll=!revAll;revealed={};renderVars();}
-function toggleRev(id){revealed[id]=!revealed[id];renderVars();}
+function toggleRevealAll(){revAll=!revAll;revealed={};renderVars();armAutoHide();}
+function toggleRev(id){revealed[id]=!revealed[id];renderVars();armAutoHide();}
+function clearPaste(){G('pasteBox').value='';}
+
+// Revealed values hide themselves again after a while, and as soon as the panel is hidden
+const AUTO_HIDE_MS = typeof __INITIAL__ !== 'undefined' ? __INITIAL__.autoHideMs : 30000;
+let hideTimer = null;
+function hideSecrets(){
+  clearTimeout(hideTimer);
+  if(!revAll && !Object.values(revealed).some(Boolean)) return;
+  revAll=false;revealed={};
+  if(active) renderVars();
+}
+function armAutoHide(){
+  clearTimeout(hideTimer);
+  if(AUTO_HIDE_MS>0 && (revAll || Object.values(revealed).some(Boolean))) hideTimer=setTimeout(hideSecrets,AUTO_HIDE_MS);
+}
+document.addEventListener('visibilitychange',()=>{ if(document.hidden) hideSecrets(); });
 function formatEnvValue(val) {
   if (!val) return '';
   if (val.includes('\n') || val.includes(' ') || val.includes('"') || val.includes("'") || val.includes('$')) {
@@ -265,7 +304,7 @@ function formatEnvValue(val) {
   }
   return val;
 }
-function copyVar(id){const v=vars.find(v=>v.id===id);if(v)vsc.postMessage({type:'copy',text:'export '+v.key+'='+formatEnvValue(v.value),label:'✓ '+v.key+' copied'});}
+function copyVar(id){const v=vars.find(v=>v.id===id);if(v)vsc.postMessage({type:'copy',text:'export '+v.key+'='+formatEnvValue(v.value),label:'✓ '+v.key+' copied',secret:true});}
 function delVar(id){if(active)vsc.postMessage({type:'deleteVar',projectId:active.projectId,envId:active.envId,varId:id});}
 function showAddVar(){G('addForm').classList.add('open');G('nKey').value='';G('nVal').value='';G('nValArea').value='';G('isMulti').checked=false;G('nVal').style.display='block';G('nValArea').style.display='none';setTimeout(()=>G('nKey').focus(),40);}
 function hideAddVar(){G('addForm').classList.remove('open');}
@@ -293,7 +332,7 @@ function saveNewVar(){
 function copyAll(fmt){
   if(!vars.length){toast('No variables to copy','err');return;}
   const text=fmt==='export'?vars.map(v=>'export '+v.key+'='+formatEnvValue(v.value)).join('\n'):vars.map(v=>v.key+'='+formatEnvValue(v.value)).join('\n');
-  vsc.postMessage({type:'copy',text,label:'✓ '+vars.length+' vars copied'});
+  vsc.postMessage({type:'copy',text,label:'✓ '+vars.length+' vars copied',secret:true});
 }
 function doImport(){
   if(!active)return;
@@ -322,21 +361,21 @@ function renderRb(){
       <div class="empty-h">No stages yet</div>
       <div class="empty-p">Add stages like "Mock Data" or "Start Services" and attach commands to each one.</div>
     </div>
-    <button class="dashed-btn" onclick="openNewStg()">${SVG.plus} Add first stage</button>`;
+    <button class="dashed-btn" ${ON('openNewStg')}>${SVG.plus} Add first stage</button>`;
     return;
   }
   let h='';
   rb.stages.forEach((stage,si)=>{
     const open = expandedStages.has(stage.id);
     h+=`<div class="stage-card ${open?'':'collapsed'}">
-      <div class="stage-hd" draggable="true" ondragstart="dragStartStage(event, ${si})" ondragover="dragOverStage(event, ${si})" ondragleave="dragLeaveStage(event)" ondrop="dropStage(event, ${si})" ondragend="dragEndStage(event)" onclick="toggleStage('${stage.id}')">
-        <span class="drag-handle" title="Drag to reorder" onclick="event.stopPropagation()">${SVG.drag}</span>
+      <div class="stage-hd" draggable="true" data-si="${si}" ${ON('toggleStage',stage.id)}>
+        <span class="drag-handle" title="Drag to reorder" data-stop>${SVG.drag}</span>
         <span class="stage-chevron ${open?'open':''}">${SVG.chevron}</span>
         <span class="stage-num">${si+1}</span>
         <span class="stage-name">${ESC(stage.name)}</span>
-        <div class="stage-acts" onclick="event.stopPropagation()">
-          <button class="s-btn" title="Rename" onclick="openEditStg(${si})">${SVG.edit}</button>
-          <button class="s-btn danger" title="Delete" onclick="askDelStg(${si})">${SVG.trash}</button>
+        <div class="stage-acts" data-stop>
+          <button class="s-btn" title="Rename" ${ON('openEditStg',si)}>${SVG.edit}</button>
+          <button class="s-btn danger" title="Delete" ${ON('askDelStg',si)}>${SVG.trash}</button>
         </div>
       </div>
       <div style="${open?'':'display:none'}">
@@ -346,17 +385,17 @@ function renderRb(){
             <div class="cmd-code">${ESC(cmd.cmd)}</div>
           </div>
           <div class="cmd-acts">
-            <button class="c-btn copy" id="cb-${si}-${ci}" title="Copy" onclick="copyCmd(${si},${ci})">${SVG.copy}</button>
-            <button class="c-btn run"  title="Run in terminal" onclick="runCmd(${si},${ci})">${SVG.terminal}</button>
-            <button class="c-btn"      title="Edit" onclick="openEditCmd(${si},${ci})">${SVG.edit}</button>
-            <button class="c-btn danger" title="Delete" onclick="askDelCmd(${si},${ci})">${SVG.trash}</button>
+            <button class="c-btn copy" id="cb-${si}-${ci}" title="Copy" ${ON('copyCmd',si,ci)}>${SVG.copy}</button>
+            <button class="c-btn run"  title="Run in terminal" ${ON('runCmd',si,ci)}>${SVG.terminal}</button>
+            <button class="c-btn"      title="Edit" ${ON('openEditCmd',si,ci)}>${SVG.edit}</button>
+            <button class="c-btn danger" title="Delete" ${ON('askDelCmd',si,ci)}>${SVG.trash}</button>
           </div>
         </div>`).join('')}
-        <div class="add-cmd-row" onclick="openNewCmd(${si})">${SVG.plusSm}&nbsp; Add command</div>
+        <div class="add-cmd-row" ${ON('openNewCmd',si)}>${SVG.plusSm}&nbsp; Add command</div>
       </div>
     </div>`;
   });
-  h+=`<button class="dashed-btn" style="margin-top:2px" onclick="openNewStg()">${SVG.plus} Add stage</button>`;
+  h+=`<button class="dashed-btn" style="margin-top:2px" ${ON('openNewStg')}>${SVG.plus} Add stage</button>`;
   list.innerHTML=h;
 }
 
@@ -429,25 +468,21 @@ function saveRb(){
 }
 
 let draggedStageIndex = null;
-function dragStartStage(e, index) {
-  if (e.target.closest('.stage-acts') || e.target.closest('.s-btn')) {
-    e.preventDefault();
-    return;
-  }
+function dragStartStage(e, hd, index) {
   draggedStageIndex = index;
-  const card = e.currentTarget.closest('.stage-card');
+  const card = hd.closest('.stage-card');
   if (card) {
     setTimeout(() => {
       card.classList.add('dragging');
     }, 0);
   }
 }
-function dragOverStage(e, index) {
+function dragOverStage(e, hd, index) {
   e.preventDefault();
   if (draggedStageIndex === null || draggedStageIndex === index) return;
-  const card = e.currentTarget.closest('.stage-card');
+  const card = hd.closest('.stage-card');
   if (!card) return;
-  const rect = e.currentTarget.getBoundingClientRect();
+  const rect = hd.getBoundingClientRect();
   const relativeY = e.clientY - rect.top;
   const isTop = relativeY < rect.height / 2;
   card.classList.remove('drag-over-top', 'drag-over-bottom');
@@ -457,14 +492,14 @@ function dragOverStage(e, index) {
     card.classList.add('drag-over-bottom');
   }
 }
-function dragLeaveStage(e) {
-  const card = e.currentTarget.closest('.stage-card');
+function dragLeaveStage(e, hd) {
+  const card = hd.closest('.stage-card');
   if (card) {
     card.classList.remove('drag-over-top', 'drag-over-bottom');
   }
 }
-function dragEndStage(e) {
-  const card = e.currentTarget.closest('.stage-card');
+function dragEndStage(e, hd) {
+  const card = hd.closest('.stage-card');
   if (card) {
     card.classList.remove('dragging');
   }
@@ -473,14 +508,14 @@ function dragEndStage(e) {
   });
   draggedStageIndex = null;
 }
-function dropStage(e, index) {
+function dropStage(e, hd, index) {
   e.preventDefault();
-  const card = e.currentTarget.closest('.stage-card');
+  const card = hd.closest('.stage-card');
   if (card) {
     card.classList.remove('drag-over-top', 'drag-over-bottom');
   }
   if (draggedStageIndex === null || draggedStageIndex === index) return;
-  const rect = e.currentTarget.getBoundingClientRect();
+  const rect = hd.getBoundingClientRect();
   const relativeY = e.clientY - rect.top;
   const isTop = relativeY < rect.height / 2;
   let targetIndex = isTop ? index : index + 1;
@@ -521,6 +556,22 @@ document.addEventListener('keydown',e=>{
 /* ── Environment Notes ── */
 let notesTimeout = null;
 let notesMode = 'edit';
+let notesFor = null;      // "projectId/envId" whose notes are loaded in the editor
+let notesPending = null;  // env the unsaved edits belong to
+
+function notesKeyOf(a) { return a ? a.projectId + '/' + a.envId : null; }
+
+function setNotesStatus(text, busy) {
+  const el = G('notesStatus');
+  el.textContent = text;
+  el.classList.toggle('busy', !!busy);
+}
+
+function updateNotesCount() {
+  const v = G('notesArea').value;
+  const w = (v.match(/\S+/g) || []).length;
+  G('notesCount').textContent = w ? `${w} word${w === 1 ? '' : 's'} · ${v.length} chars` : '';
+}
 
 function setNotesMode(mode) {
   notesMode = mode;
@@ -535,65 +586,227 @@ function setNotesMode(mode) {
   }
 }
 
-function insertFormat(prefix, suffix = '') {
+function onNotesInput() {
+  if (!active || notesFor !== notesKeyOf(active)) return;
+  notesPending = { projectId: active.projectId, envId: active.envId };
+  setNotesStatus('Saving…', true);
+  updateNotesCount();
+  clearTimeout(notesTimeout);
+  notesTimeout = setTimeout(flushNotes, 800);
+}
+
+// Writes pending edits immediately; call before leaving the env or the tab.
+function flushNotes() {
+  if (!notesTimeout) return;
+  clearTimeout(notesTimeout);
+  notesTimeout = null;
+  vsc.postMessage({
+    type: 'saveNotes',
+    projectId: notesPending.projectId,
+    envId: notesPending.envId,
+    notes: G('notesArea').value
+  });
+  setNotesStatus('Saved');
+}
+
+/* ── Notes editing helpers ── */
+function notesReplace(start, end, text, selStart, selEnd) {
   const el = G('notesArea');
-  const start = el.selectionStart;
-  const end = el.selectionEnd;
-  const text = el.value;
-  const sel = text.substring(start, end);
-  const rep = prefix + sel + suffix;
-  el.value = text.substring(0, start) + rep + text.substring(end);
+  if (el.readOnly) return;
   el.focus();
-  el.setSelectionRange(start + prefix.length, start + prefix.length + sel.length);
+  el.setSelectionRange(start, end);
+  // execCommand keeps the textarea's undo history intact
+  const ok = text === ''
+    ? (start === end || document.execCommand('delete'))
+    : document.execCommand('insertText', false, text);
+  if (!ok) el.setRangeText(text, start, end, 'end');
+  if (selStart != null) el.setSelectionRange(selStart, selEnd ?? selStart);
   onNotesInput();
 }
 
-function renderMarkdown(md) {
-  if (!md || !md.trim()) return '<div class="empty-notes">No notes yet. Click Edit to add some!</div>';
-  let html = ESC(md);
-  
-  // Headers: ###, ##, #
-  html = html.replace(/^### (.*?)$/gm, '<h3>$1</h3>');
-  html = html.replace(/^## (.*?)$/gm, '<h2>$1</h2>');
-  html = html.replace(/^# (.*?)$/gm, '<h1>$1</h1>');
-  
-  // Bold: **text**
-  html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-  
-  // Italic: *text*
-  html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
-  
-  // Code inline: `code`
-  html = html.replace(/`(.*?)`/g, '<code>$1</code>');
-  
-  // Links: [text](url)
-  html = html.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank">$1</a>');
-  
-  // Bullet lists: - item or * item
-  html = html.replace(/^\s*[-*]\s+(.*?)$/gm, '<li>$1</li>');
-  
-  // Wrap consecutive list items in <ul>
-  html = html.replace(/(<li>.*?<\/li>)+/gs, '<ul>$&</ul>');
-  
-  // Code blocks: ```js ... ```
-  html = html.replace(/```(.*?)\r?\n(.*?)\r?\n```/gs, '<pre><code>$2</code></pre>');
-  
-  // Newlines
-  html = html.replace(/\n/g, '<br>');
-  
-  return html;
+function notesWrap(prefix, suffix, placeholder) {
+  const el = G('notesArea');
+  const s = el.selectionStart, e = el.selectionEnd;
+  const sel = el.value.substring(s, e) || placeholder;
+  notesReplace(s, e, prefix + sel + suffix, s + prefix.length, s + prefix.length + sel.length);
 }
 
-function onNotesInput() {
-  G('notesStatus').textContent = 'Saving...';
-  clearTimeout(notesTimeout);
-  notesTimeout = setTimeout(() => {
-    vsc.postMessage({
-      type: 'saveNotes',
-      projectId: active.projectId,
-      envId: active.envId,
-      notes: G('notesArea').value
-    });
-    G('notesStatus').textContent = 'All changes saved automatically';
-  }, 800);
+function notesLinePrefix(prefix) {
+  const el = G('notesArea');
+  const v = el.value, s = el.selectionStart;
+  let e = el.selectionEnd;
+  if (e > s && v[e - 1] === '\n') e--;
+  const ls = v.lastIndexOf('\n', s - 1) + 1;
+  let le = v.indexOf('\n', e);
+  if (le < 0) le = v.length;
+  const lines = v.substring(ls, le).split('\n');
+  const all = lines.every(l => l.startsWith(prefix));
+  const out = lines.map(l => all ? l.slice(prefix.length) : (l.startsWith(prefix) ? l : prefix + l)).join('\n');
+  if (lines.length > 1) notesReplace(ls, le, out, ls, ls + out.length);
+  else notesReplace(ls, le, out, ls + out.length);
 }
+
+function notesCode() {
+  const el = G('notesArea');
+  const v = el.value, s = el.selectionStart, e = el.selectionEnd;
+  if (!v.substring(s, e).includes('\n')) { notesWrap('`', '`', 'code'); return; }
+  const pre = (s > 0 && v[s - 1] !== '\n' ? '\n' : '') + '```\n';
+  const suf = '\n```' + (e < v.length && v[e] !== '\n' ? '\n' : '');
+  notesWrap(pre, suf, '');
+}
+
+function notesLink() {
+  const el = G('notesArea');
+  const s = el.selectionStart, e = el.selectionEnd;
+  const sel = el.value.substring(s, e);
+  if (/^https?:\/\/\S+$/i.test(sel)) notesReplace(s, e, '[text](' + sel + ')', s + 1, s + 5);
+  else {
+    const t = sel || 'text';
+    notesReplace(s, e, '[' + t + '](https://)', s + t.length + 3, s + t.length + 11);
+  }
+}
+
+// Enter continues a list / checklist; Enter on an empty item ends it
+G('notesArea').addEventListener('keydown', e => {
+  if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
+  const el = e.target;
+  const s = el.selectionStart;
+  if (s !== el.selectionEnd) return;
+  const ls = el.value.lastIndexOf('\n', s - 1) + 1;
+  const m = /^(\s*)([-*+]|(\d+)([.)]))\s+(\[[ xX]\]\s+)?(.*)$/.exec(el.value.substring(ls, s));
+  if (!m) return;
+  e.preventDefault();
+  if (!m[6]) { notesReplace(ls, s, ''); return; }
+  const marker = m[3] ? (Number(m[3]) + 1) + m[4] : m[2];
+  notesReplace(s, s, '\n' + m[1] + marker + ' ' + (m[5] ? '[ ] ' : ''));
+});
+
+// Ticking a checkbox in the preview updates the matching "- [ ]" line
+G('notesPreview').addEventListener('change', e => {
+  const t = e.target;
+  if (!t.matches || !t.matches('input[data-line]')) return;
+  const el = G('notesArea');
+  const lines = el.value.split('\n');
+  const i = Number(t.dataset.line);
+  if (lines[i] == null) return;
+  lines[i] = lines[i].replace(/\[( |x|X)\]/, t.checked ? '[x]' : '[ ]');
+  el.value = lines.join('\n');
+  onNotesInput();
+  G('notesPreview').innerHTML = renderMarkdown(el.value);
+});
+
+/* ── Markdown rendering ── */
+function mdInline(raw) {
+  // Finished HTML is stashed so later rules can't rewrite it
+  const stash = [];
+  const keep = h => { stash.push(h); return '\x01' + (stash.length - 1) + '\x01'; };
+  let s = ESC(raw).replace(/"/g, '&quot;');
+  s = s.replace(/`([^`]+)`/g, (_, c) => keep('<code>' + c + '</code>'));
+  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, t, u) =>
+    /^(https?:\/\/|mailto:)/i.test(u) ? keep('<a href="' + u + '" title="' + u + '">') + t + keep('</a>') : m);
+  s = s.replace(/(^|[\s(])(https?:\/\/\S*[^\s.,;:!?)])/g, (_, p, u) => p + keep('<a href="' + u + '">' + u + '</a>'));
+  s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+       .replace(/\*(.+?)\*/g, '<em>$1</em>')
+       .replace(/~~(.+?)~~/g, '<del>$1</del>');
+  return s.replace(/\x01(\d+)\x01/g, (_, i) => stash[Number(i)]);
+}
+
+function renderMarkdown(md) {
+  if (!md || !md.trim()) {
+    return '<div class="empty-notes"><b>No notes yet</b><span>Switch to Write to add setup steps, links or reminders.</span></div>';
+  }
+  const FENCE = /^\s*```/, HEAD = /^(#{1,6})\s+(.*)$/, HR = /^\s*([-*_])(\s*\1){2,}\s*$/;
+  const QUOTE = /^\s*>\s?(.*)$/, LIST = /^(\s*)([-*+]|(\d+)[.)])\s+(.*)$/;
+  // Keep one entry per source line so checkbox data-line indexes stay valid
+  const lines = md.split('\n').map(l => l.replace(/\r$/, '').replace(/\x01/g, ''));
+  const out = [];
+  let i = 0, m;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (FENCE.test(line)) {
+      const buf = [];
+      i++;
+      while (i < lines.length && !FENCE.test(lines[i])) buf.push(lines[i++]);
+      i++;
+      out.push('<pre><code>' + ESC(buf.join('\n')) + '</code></pre>');
+      continue;
+    }
+    if (!line.trim()) { i++; continue; }
+    if ((m = HEAD.exec(line))) {
+      const n = Math.min(m[1].length, 3);
+      out.push(`<h${n}>${mdInline(m[2].replace(/\s+#+\s*$/, ''))}</h${n}>`);
+      i++;
+      continue;
+    }
+    if (HR.test(line)) { out.push('<hr>'); i++; continue; }
+    if (QUOTE.test(line)) {
+      const buf = [];
+      while (i < lines.length && (m = QUOTE.exec(lines[i]))) { buf.push(mdInline(m[1])); i++; }
+      out.push('<blockquote>' + buf.join('<br>') + '</blockquote>');
+      continue;
+    }
+    if (LIST.test(line)) {
+      let html = '', tag = '';
+      while (i < lines.length && !HR.test(lines[i]) && (m = LIST.exec(lines[i]))) {
+        const t = m[3] ? 'ol' : 'ul';
+        if (t !== tag) {
+          if (tag) html += '</' + tag + '>';
+          tag = t;
+          html += t === 'ol' ? '<ol start="' + Number(m[3]) + '">' : '<ul>';
+        }
+        const d = Math.min(Math.floor(m[1].replace(/\t/g, '  ').length / 2), 3);
+        const task = /^\[( |x|X)\]\s+(.*)$/.exec(m[4]);
+        if (task) {
+          const done = task[1] !== ' ';
+          html += `<li class="task${d ? ' d' + d : ''}${done ? ' done' : ''}"><input type="checkbox" data-line="${i}"${done ? ' checked' : ''}><span>${mdInline(task[2])}</span></li>`;
+        } else {
+          html += `<li${d ? ' class="d' + d + '"' : ''}>${mdInline(m[4])}</li>`;
+        }
+        i++;
+      }
+      out.push(html + '</' + tag + '>');
+      continue;
+    }
+    const buf = [];
+    do { buf.push(mdInline(lines[i++])); }
+    while (i < lines.length && lines[i].trim() && !FENCE.test(lines[i]) && !HEAD.test(lines[i])
+           && !HR.test(lines[i]) && !QUOTE.test(lines[i]) && !LIST.test(lines[i]));
+    out.push('<p>' + buf.join('<br>') + '</p>');
+  }
+  return out.join('');
+}
+
+/* ── Event wiring ── */
+// The webview's CSP blocks inline handlers, so markup carries data-act / data-args instead
+const ACTIONS = {
+  act, goBack, switchTab, toggleRevealAll, toggleRev, copyVar, delVar, showAddVar, hideAddVar, saveNewVar,
+  copyAll, doImport, clearPaste,
+  toggleProj, openNewProj, openEditProj, askDelProj, saveProjModal,
+  openEnv, openNewEnv, openEditEnv, askDelEnv, saveEnvModal, pickColor,
+  toggleStage, openNewStg, openEditStg, askDelStg, saveStageModal,
+  openNewCmd, openEditCmd, askDelCmd, saveCmdModal, copyCmd, runCmd, runAll,
+  setNotesMode, notesWrap, notesLinePrefix, notesCode, notesLink,
+  close_, doConfirm
+};
+const elOf = e => e.target.nodeType === 1 ? e.target : e.target.parentElement;
+
+document.addEventListener('click', e => {
+  // data-stop marks areas whose clicks must not reach an enclosing data-act
+  const el = elOf(e)?.closest('[data-act],[data-stop]');
+  if (!el || !el.dataset.act) return;
+  const fn = ACTIONS[el.dataset.act];
+  if (fn) fn(...JSON.parse(el.dataset.args || '[]'));
+});
+
+G('varSearch').addEventListener('input', filterVars);
+G('isMulti').addEventListener('change', toggleMultiVal);
+G('notesArea').addEventListener('input', onNotesInput);
+
+// Stage drag-and-drop, delegated from the list to each .stage-hd
+[['dragstart', dragStartStage], ['dragover', dragOverStage], ['dragleave', dragLeaveStage],
+ ['drop', dropStage], ['dragend', dragEndStage]].forEach(([type, handler]) => {
+  G('rbList').addEventListener(type, e => {
+    const hd = elOf(e)?.closest('.stage-hd');
+    if (hd) handler(e, hd, Number(hd.dataset.si));
+  });
+});

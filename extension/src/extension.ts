@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path   from 'path';
 import * as fs     from 'fs';
+import * as crypto from 'crypto';
 import { SVG }     from './svgs';
 
 // ── Data model ────────────────────────────────────────────────────
@@ -41,11 +42,64 @@ function safeJson<T>(raw: string | undefined, fallback: T): T {
   try { return JSON.parse(raw) as T; } catch { return fallback; }
 }
 
+// ── Backup encryption (scrypt + AES-256-GCM) ──────────────────────
+interface EncryptedBundle {
+  format: 'envstash-encrypted';
+  v: 1;
+  kdf: { name: 'scrypt'; N: number; r: number; p: number; salt: string };
+  cipher: { name: 'aes-256-gcm'; iv: string; tag: string };
+  data: string;
+}
+
+const ENC_FORMAT = 'envstash-encrypted';
+const SCRYPT = { N: 1 << 15, r: 8, p: 1 };
+const MIN_PASSPHRASE = 8;
+
+function deriveKey(pass: string, salt: Buffer, N: number, r: number, p: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    crypto.scrypt(pass.normalize('NFKC'), salt, 32, { N, r, p, maxmem: 256 * N * r * p },
+      (err, key) => err ? reject(err) : resolve(key));
+  });
+}
+
+async function encryptBundle(json: string, pass: string): Promise<EncryptedBundle> {
+  const salt = crypto.randomBytes(16);
+  const iv = crypto.randomBytes(12);
+  const key = await deriveKey(pass, salt, SCRYPT.N, SCRYPT.r, SCRYPT.p);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const data = Buffer.concat([cipher.update(json, 'utf8'), cipher.final()]);
+  return {
+    format: ENC_FORMAT, v: 1,
+    kdf: { name: 'scrypt', ...SCRYPT, salt: salt.toString('base64') },
+    cipher: { name: 'aes-256-gcm', iv: iv.toString('base64'), tag: cipher.getAuthTag().toString('base64') },
+    data: data.toString('base64'),
+  };
+}
+
+async function decryptBundle(enc: EncryptedBundle, pass: string): Promise<string> {
+  const { N, r, p, salt } = enc.kdf ?? ({} as EncryptedBundle['kdf']);
+  // Cost parameters come from the file, so bound them before spending memory on them
+  const okParams = enc.v === 1 && enc.kdf?.name === 'scrypt' && enc.cipher?.name === 'aes-256-gcm'
+    && Number.isInteger(N) && N >= (1 << 14) && N <= (1 << 17) && (N & (N - 1)) === 0 && r === 8 && p === 1;
+  if (!okParams) throw new Error('Unsupported encrypted backup format');
+  try {
+    const key = await deriveKey(pass, Buffer.from(salt, 'base64'), N, r, p);
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(enc.cipher.iv, 'base64'));
+    decipher.setAuthTag(Buffer.from(enc.cipher.tag, 'base64'));
+    return Buffer.concat([decipher.update(Buffer.from(enc.data, 'base64')), decipher.final()]).toString('utf8');
+  } catch {
+    throw new Error('Wrong passphrase or corrupted backup file');
+  }
+}
+
+let provider: EnvStashProvider | undefined;
+
 export function activate(context: vscode.ExtensionContext) {
-  const provider = new EnvStashProvider(context);
+  const p = provider = new EnvStashProvider(context);
+  const report = (err: any) => vscode.window.showErrorMessage(`EnvStash error: ${err?.message ?? err}`);
 
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider('envstash.panel', provider, {
+    vscode.window.registerWebviewViewProvider('envstash.panel', p, {
       webviewOptions: { retainContextWhenHidden: true }
     })
   );
@@ -58,22 +112,20 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Export all from command palette
   context.subscriptions.push(
-    vscode.commands.registerCommand('envstash.exportAll', async () => {
-      await provider.exportAll();
-    })
+    vscode.commands.registerCommand('envstash.exportAll', () => p.exportAll().catch(report))
   );
 
   // Import from command palette
   context.subscriptions.push(
-    vscode.commands.registerCommand('envstash.importAll', async () => {
-      await provider.importFromFile(true);
-    })
+    vscode.commands.registerCommand('envstash.importAll', () => p.importFromFile(true).catch(report))
   );
 }
 
 class EnvStashProvider implements vscode.WebviewViewProvider {
   private _view?: vscode.WebviewView;
   private _secrets: vscode.SecretStorage;
+  private _queue: Promise<unknown> = Promise.resolve();
+  private _clip?: { text: string; timer: NodeJS.Timeout };
 
   constructor(private readonly _ctx: vscode.ExtensionContext) {
     this._secrets = _ctx.secrets;
@@ -81,8 +133,7 @@ class EnvStashProvider implements vscode.WebviewViewProvider {
 
   // ── Public: called from command palette ─────────────────────────
   async exportAll() {
-    const bundle = await this._buildBundle(null);
-    await this._writeBundle(bundle, 'envstash-all.json');
+    await this._export(null, 'envstash-all.json');
   }
 
   async importFromFile(merge: boolean) {
@@ -92,25 +143,66 @@ class EnvStashProvider implements vscode.WebviewViewProvider {
     });
     if (!uris?.length) return;
     const raw = Buffer.from(await vscode.workspace.fs.readFile(uris[0])).toString('utf8');
-    await this._applyBundle(raw, merge);
+
+    let parsed: any;
+    try { parsed = JSON.parse(raw); } catch { throw new Error('Invalid JSON file'); }
+    if (parsed?.format === ENC_FORMAT) {
+      const pass = await vscode.window.showInputBox({
+        title: 'EnvStash import', prompt: 'This backup is encrypted. Enter its passphrase.',
+        password: true, ignoreFocusOut: true
+      });
+      if (!pass) return;
+      const json = await decryptBundle(parsed as EncryptedBundle, pass);
+      try { parsed = JSON.parse(json); } catch { throw new Error('Invalid EnvStash export file'); }
+    }
+    if (!parsed?.projects || !Array.isArray(parsed.projects)) throw new Error('Invalid EnvStash export file');
+    await this._enqueue(() => this._applyBundle(parsed as ExportBundle, merge));
+  }
+
+  // Clears a secret we put on the clipboard if VS Code shuts down before the timer fires
+  async dispose() {
+    const clip = this._clip;
+    if (!clip) return;
+    this._cancelClipboardClear();
+    try {
+      if (await vscode.env.clipboard.readText() === clip.text) await vscode.env.clipboard.writeText('');
+    } catch { /* clipboard unavailable */ }
   }
 
   // ── Webview setup ───────────────────────────────────────────────
   async resolveWebviewView(wv: vscode.WebviewView) {
     this._view = wv;
-    wv.webview.options = { enableScripts: true };
+    wv.webview.options = { enableScripts: true, localResourceRoots: [] };
     wv.webview.html = this._getHtml();
 
-    wv.webview.onDidReceiveMessage(async (msg) => {
-      try {
-        await this._handle(msg);
-      } catch (err: any) {
-        vscode.window.showErrorMessage(`EnvStash error: ${err.message}`);
-      }
+    wv.webview.onDidReceiveMessage((msg) => {
+      // Export/import wait on dialogs, so they stay off the queue and only enqueue their storage work
+      const work = TRANSFER_MSGS.has(msg?.type) ? this._handleTransfer(msg) : this._enqueue(() => this._handle(msg));
+      work.catch((err: any) => vscode.window.showErrorMessage(`EnvStash error: ${err?.message ?? err}`));
     });
   }
 
   private _post(msg: object) { this._view?.webview.postMessage(msg); }
+
+  // Storage work runs one at a time so a read can never overtake the write before it
+  private _enqueue<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this._queue.then(fn);
+    this._queue = run.catch(() => undefined);
+    return run;
+  }
+
+  private async _handleTransfer(msg: any) {
+    switch (msg.type) {
+      case 'exportProject': {
+        const p = this._getIndex().projects.find(p => p.id === msg.projectId);
+        const fname = `envstash-${(p?.name ?? 'project').replace(/[^a-z0-9]/gi, '-').toLowerCase()}.json`;
+        await this._export(msg.projectId, fname);
+        break;
+      }
+      case 'exportAll':  await this.exportAll(); break;
+      case 'importFile': await this.importFromFile(msg.merge ?? true); break;
+    }
+  }
 
   // ── Message router ──────────────────────────────────────────────
   private async _handle(msg: any) {
@@ -334,7 +426,19 @@ class EnvStashProvider implements vscode.WebviewViewProvider {
         const text = msg.text ?? '';
         if (!text) return;
         await vscode.env.clipboard.writeText(text);
-        vscode.window.showInformationMessage(msg.label || '✓ Copied');
+        const secs = msg.secret ? settingSeconds('clipboardClearSeconds', 30) : 0;
+        this._cancelClipboardClear();
+        if (secs > 0) {
+          const timer = setTimeout(async () => {
+            this._clip = undefined;
+            try {
+              // leave the clipboard alone if the user has copied something else since
+              if (await vscode.env.clipboard.readText() === text) await vscode.env.clipboard.writeText('');
+            } catch { /* clipboard unavailable */ }
+          }, secs * 1000);
+          this._clip = { text, timer };
+        }
+        vscode.window.showInformationMessage((msg.label || '✓ Copied') + (secs > 0 ? ` · clipboard clears in ${secs}s` : ''));
         break;
       }
       case 'runInTerminal': {
@@ -418,28 +522,12 @@ class EnvStashProvider implements vscode.WebviewViewProvider {
         term.sendText(finalCmd);
         break;
       }
-
-      // IMPORT / EXPORT (from webview)
-      case 'exportProject': {
-        const bundle = await this._buildBundle(msg.projectId);
-        const idx = await this._getIndex();
-        const p = idx.projects.find(p => p.id === msg.projectId);
-        const fname = `envstash-${(p?.name ?? 'project').replace(/[^a-z0-9]/gi, '-').toLowerCase()}.json`;
-        await this._writeBundle(bundle, fname);
-        break;
-      }
-      case 'exportAll': {
-        const bundle = await this._buildBundle(null);
-        await this._writeBundle(bundle, 'envstash-all.json');
-        break;
-      }
-      case 'importFile': {
-        await this.importFromFile(msg.merge ?? true);
-        const idx = await this._getIndex();
-        this._post({ type: 'index', data: idx });
-        break;
-      }
     }
+  }
+
+  private _cancelClipboardClear() {
+    if (this._clip) clearTimeout(this._clip.timer);
+    this._clip = undefined;
   }
 
   // ── Storage helpers ─────────────────────────────────────────────
@@ -488,23 +576,44 @@ class EnvStashProvider implements vscode.WebviewViewProvider {
     return { version: BUNDLE_VERSION, exportedAt: new Date().toISOString(), projects: result };
   }
 
-  private async _writeBundle(bundle: ExportBundle, fname: string) {
-    const json = JSON.stringify(bundle, null, 2);
-    const uris = await vscode.window.showSaveDialog({
+  // Returns the passphrase, '' for a deliberately unencrypted export, or undefined if cancelled
+  private async _askNewPassphrase(): Promise<string | undefined> {
+    const pass = await vscode.window.showInputBox({
+      title: 'EnvStash export',
+      prompt: 'Passphrase to encrypt this backup. Leave empty to export as plain text.',
+      password: true, ignoreFocusOut: true,
+      validateInput: v => v && v.length < MIN_PASSPHRASE ? `Use at least ${MIN_PASSPHRASE} characters` : undefined
+    });
+    if (pass === undefined) return undefined;
+    if (!pass) {
+      const choice = await vscode.window.showWarningMessage('Export without encryption?',
+        { modal: true, detail: 'The file will contain every secret in plain text.' }, 'Export unencrypted');
+      return choice ? '' : undefined;
+    }
+    const again = await vscode.window.showInputBox({
+      title: 'EnvStash export', prompt: 'Confirm passphrase', password: true, ignoreFocusOut: true
+    });
+    if (again === undefined) return undefined;
+    if (again !== pass) throw new Error('Passphrases do not match');
+    return pass;
+  }
+
+  private async _export(projectId: string | null, fname: string) {
+    const pass = await this._askNewPassphrase();
+    if (pass === undefined) return;
+    const uri = await vscode.window.showSaveDialog({
       defaultUri: vscode.Uri.file(fname),
       filters: { 'EnvStash JSON': ['json'] },
       saveLabel: 'Export'
     });
-    if (!uris) return;
-    await vscode.workspace.fs.writeFile(uris, Buffer.from(json, 'utf8'));
-    vscode.window.showInformationMessage(`✓ Exported to ${path.basename(uris.fsPath)}`);
+    if (!uri) return;
+    const json = JSON.stringify(await this._enqueue(() => this._buildBundle(projectId)), null, 2);
+    const out = pass ? JSON.stringify(await encryptBundle(json, pass), null, 2) : json;
+    await vscode.workspace.fs.writeFile(uri, Buffer.from(out, 'utf8'));
+    vscode.window.showInformationMessage(`✓ Exported to ${path.basename(uri.fsPath)}${pass ? ' (encrypted)' : ' (not encrypted)'}`);
   }
 
-  private async _applyBundle(raw: string, merge: boolean) {
-    let bundle: ExportBundle;
-    try { bundle = JSON.parse(raw); } catch { throw new Error('Invalid JSON file'); }
-    if (!bundle.projects || !Array.isArray(bundle.projects)) throw new Error('Invalid EnvStash export file');
-
+  private async _applyBundle(bundle: ExportBundle, merge: boolean) {
     const idx = await this._getIndex();
     let imported = 0;
 
@@ -558,17 +667,34 @@ class EnvStashProvider implements vscode.WebviewViewProvider {
     const js = fs.readFileSync(jsPath, 'utf8');
 
     html = html.replace('/*PLACEHOLDER_CSS*/', () => css);
-    const initialData = `const __INITIAL_INDEX__ = ${JSON.stringify(this._getIndex())};`;
-    html = html.replace('/*PLACEHOLDER_JS*/', () => initialData + '\n' + js);
+    html = html.replace('/*PLACEHOLDER_JS*/', () => js);
 
     // Replace SVG placeholders
-    const htmlWithSvg = html.replace(/\$\{SVG\.([a-zA-Z_]+)\}/g, (_, name) => {
+    html = html.replace(/\$\{SVG\.([a-zA-Z_]+)\}/g, (_, name) => {
       const s = (SVG as Record<string, string>)[name];
       return s ?? '';
     });
 
-    return htmlWithSvg;
+    // Only the nonce'd script may run; inline event handlers and remote content are blocked
+    const nonce = crypto.randomBytes(16).toString('base64');
+    const csp = `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; base-uri 'none'; form-action 'none'`;
+    html = html.replace('__CSP__', () => csp).replace('__NONCE__', () => nonce);
+
+    // User data goes in last so nothing above can rewrite it, with "<" escaped so it can't close the script tag
+    const data = {
+      index: this._getIndex(),
+      autoHideMs: settingSeconds('autoHideSeconds', 30) * 1000,
+    };
+    const initialData = `const __INITIAL__ = ${JSON.stringify(data).replace(/</g, '\\u003c')};`;
+    return html.replace('/*PLACEHOLDER_DATA*/', () => initialData);
   }
+}
+
+const TRANSFER_MSGS = new Set(['exportProject', 'exportAll', 'importFile']);
+
+function settingSeconds(name: string, fallback: number): number {
+  const n = vscode.workspace.getConfiguration('envstash').get<number>(name, fallback);
+  return typeof n === 'number' && n > 0 ? Math.min(n, 3600) : 0;
 }
 
 function detectShell(term: vscode.Terminal): 'pwsh' | 'cmd' | 'bash' {
@@ -606,4 +732,4 @@ function detectShell(term: vscode.Terminal): 'pwsh' | 'cmd' | 'bash' {
   return 'bash';
 }
 
-export function deactivate() {}
+export function deactivate() { return provider?.dispose(); }

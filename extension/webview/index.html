@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta http-equiv="Content-Security-Policy" content="__CSP__"/>
 <title>EnvStash</title>
 <style>
 /*PLACEHOLDER_CSS*/
@@ -18,8 +19,8 @@
       ${SVG.lock}
     </div>
     <div class="topbar-actions" style="display:flex;gap:5px">
-      <button class="topbar-btn" title="Export all projects data" onclick="act('exportAll')">${SVG.upload} Export all</button>
-      <button class="topbar-btn" title="Import data from JSON" onclick="act('importFile',{merge:true})">${SVG.download} Import</button>
+      <button class="topbar-btn" title="Export all projects data" data-act="act" data-args='["exportAll"]'>${SVG.upload} Export all</button>
+      <button class="topbar-btn" title="Import data from JSON" data-act="act" data-args='["importFile",{"merge":true}]'>${SVG.download} Import</button>
     </div>
   </div>
 
@@ -29,24 +30,24 @@
 <!-- ══ SCREEN: ENV (vars + runbook) ══ -->
 <div class="screen" id="sEnv">
   <div class="env-topbar">
-    <button class="icon-btn" onclick="goBack()" title="Back">${SVG.back}</button>
+    <button class="icon-btn" data-act="goBack" title="Back">${SVG.back}</button>
     <div class="env-dot" id="envDot"></div>
     <span class="env-title" id="envTitle"></span>
-    <button class="reveal-btn" id="revBtn" onclick="toggleRevealAll()">${SVG.eye} Show all</button>
+    <button class="reveal-btn" id="revBtn" data-act="toggleRevealAll">${SVG.eye} Show all</button>
   </div>
   <div class="bc" id="bc"></div>
 
   <div class="tabs">
-    <button class="tab active" id="tVars"    onclick="switchTab('vars')">${SVG.key} Variables</button>
-    <button class="tab"        id="tImport"  onclick="switchTab('import')">${SVG.download} Import</button>
-    <button class="tab"        id="tRunbook" onclick="switchTab('runbook')">${SVG.play} Runbook</button>
-    <button class="tab"        id="tNotes"   onclick="switchTab('notes')">${SVG.file} Notes</button>
+    <button class="tab active" id="tVars"    data-act="switchTab" data-args='["vars"]'>${SVG.key} Variables</button>
+    <button class="tab"        id="tImport"  data-act="switchTab" data-args='["import"]'>${SVG.download} Import</button>
+    <button class="tab"        id="tRunbook" data-act="switchTab" data-args='["runbook"]'>${SVG.play} Runbook</button>
+    <button class="tab"        id="tNotes"   data-act="switchTab" data-args='["notes"]'>${SVG.file} Notes</button>
   </div>
 
   <!-- Variables -->
   <div id="cVars" style="display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden">
     <div class="search-bar" id="varSearchContainer" style="padding:7px 10px;border-bottom:1px solid var(--ev-border2);display:none;align-items:center;background:var(--ev-card)">
-      <input type="text" id="varSearch" placeholder="Search variables..." oninput="filterVars()" style="width:100%;padding:4px 8px;border-radius:4px;border:1px solid var(--ev-border);background:var(--ev-surface);color:var(--vscode-foreground);font-family:inherit;font-size:11px" autocomplete="off" spellcheck="false"/>
+      <input type="text" id="varSearch" placeholder="Search variables..." style="width:100%;padding:4px 8px;border-radius:4px;border:1px solid var(--ev-border);background:var(--ev-surface);color:var(--vscode-foreground);font-family:inherit;font-size:11px" autocomplete="off" spellcheck="false"/>
     </div>
     <div class="var-list" id="varList"></div>
     <div class="add-form" id="addForm">
@@ -57,13 +58,13 @@
           <textarea id="nValArea" placeholder="multi-line value" style="display:none; min-height:60px; resize:vertical; font-family:monospace" autocomplete="off" spellcheck="false"></textarea>
         </div>
         <label style="display:inline-flex; align-items:center; gap:5px; font-size:11px; color:var(--ev-muted); cursor:pointer; user-select:none; margin-top:2px">
-          <input type="checkbox" id="isMulti" onchange="toggleMultiVal()" style="margin:0; width:13px; height:13px"/>
+          <input type="checkbox" id="isMulti" style="margin:0; width:13px; height:13px"/>
           <span>Multi-line value</span>
         </label>
       </div>
       <div class="form-btns" style="margin-top:4px">
-        <button class="btn btn-ghost" onclick="hideAddVar()">Cancel</button>
-        <button class="btn btn-primary" onclick="saveNewVar()">Save</button>
+        <button class="btn btn-ghost" data-act="hideAddVar">Cancel</button>
+        <button class="btn btn-primary" data-act="saveNewVar">Save</button>
       </div>
     </div>
   </div>
@@ -77,8 +78,8 @@
           <textarea id="pasteBox" placeholder="DB_HOST=localhost&#10;DB_PASS=secret&#10;API_KEY=abc123&#10;# comments ignored"></textarea>
           <div class="import-hint">Supports: KEY=value · export KEY=value · KEY="quoted" · Lines starting with # are ignored · Keys must match [A-Za-z_][A-Za-z0-9_]*</div>
           <div class="form-btns">
-            <button class="btn btn-ghost" onclick="G('pasteBox').value=''">Clear</button>
-            <button class="btn btn-primary" onclick="doImport()">Import vars</button>
+            <button class="btn btn-ghost" data-act="clearPaste">Clear</button>
+            <button class="btn btn-primary" data-act="doImport">Import vars</button>
           </div>
         </div>
       </div>
@@ -88,7 +89,7 @@
   <!-- Runbook tab -->
   <div id="cRunbook" style="display:none;flex:1;min-height:0;overflow:hidden;flex-direction:column">
     <div class="rb-bar" id="rbBar" style="padding:6px 10px;border-bottom:1px solid var(--ev-border2);display:none;justify-content:flex-end;background:var(--ev-card)">
-      <button class="btn btn-primary" onclick="runAll()" style="font-size:11px;padding:4px 10px;display:flex;align-items:center;gap:4px">
+      <button class="btn btn-primary" data-act="runAll" style="font-size:11px;padding:4px 10px;display:flex;align-items:center;gap:4px">
         ${SVG.play} Run playbook
       </button>
     </div>
@@ -96,31 +97,39 @@
   </div>
 
   <!-- Notes tab -->
-  <div id="cNotes" style="display:none;flex:1;min-height:0;overflow:hidden;flex-direction:column;padding:8px 10px">
-    <div class="notes-hdr" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;gap:6px">
-      <div class="segmented-control" style="display:flex;background:var(--ev-surface);border-radius:4px;padding:2px">
-        <button class="seg-btn active" id="btnNotesEdit" onclick="setNotesMode('edit')">Edit</button>
-        <button class="seg-btn" id="btnNotesPrev" onclick="setNotesMode('preview')">Preview</button>
+  <div id="cNotes" style="display:none;flex:1;min-height:0;overflow:hidden;flex-direction:column;padding:10px">
+    <div class="notes-card">
+      <div class="notes-bar">
+        <div class="segmented-control">
+          <button class="seg-btn active" id="btnNotesEdit" data-act="setNotesMode" data-args='["edit"]'>${SVG.editSm} Write</button>
+          <button class="seg-btn" id="btnNotesPrev" data-act="setNotesMode" data-args='["preview"]'>${SVG.eye} Preview</button>
+        </div>
+        <div class="notes-tools" id="notesFormatBar">
+          <button class="tool-btn" title="Bold" data-act="notesWrap" data-args='["**","**","bold text"]'>${SVG.bold}</button>
+          <button class="tool-btn" title="Italic" data-act="notesWrap" data-args='["*","*","italic text"]'>${SVG.italic}</button>
+          <button class="tool-btn" title="Heading" data-act="notesLinePrefix" data-args='["## "]'>${SVG.heading}</button>
+          <span class="tool-sep"></span>
+          <button class="tool-btn" title="Bullet list" data-act="notesLinePrefix" data-args='["- "]'>${SVG.list}</button>
+          <button class="tool-btn" title="Checklist" data-act="notesLinePrefix" data-args='["- [ ] "]'>${SVG.checklist}</button>
+          <button class="tool-btn" title="Quote" data-act="notesLinePrefix" data-args='["> "]'>${SVG.quote}</button>
+          <span class="tool-sep"></span>
+          <button class="tool-btn" title="Code" data-act="notesCode">${SVG.code}</button>
+          <button class="tool-btn" title="Link" data-act="notesLink">${SVG.link}</button>
+        </div>
       </div>
-      <div id="notesFormatBar" style="display:flex;gap:4px">
-        <button class="tool-btn" title="Bold" onclick="insertFormat('**', '**')"><b>B</b></button>
-        <button class="tool-btn" title="Italic" onclick="insertFormat('*', '*')"><i>I</i></button>
-        <button class="tool-btn" title="Code block" onclick="insertFormat('```\\n', '\\n```')">Code</button>
-        <button class="tool-btn" title="List item" onclick="insertFormat('- ')">List</button>
-        <button class="tool-btn" title="Link" onclick="insertFormat('[', '](url)')">Link</button>
+      <textarea id="notesArea" class="notes-area" spellcheck="false" placeholder="Notes for this environment — setup steps, links, gotchas…&#10;&#10;Markdown works: # heading, **bold**, - list, - [ ] todo, `code`"></textarea>
+      <div id="notesPreview" class="notes-preview markdown-body" style="display:none"></div>
+      <div class="notes-foot">
+        <span id="notesCount"></span>
+        <span class="notes-status" id="notesStatus">Saved</span>
       </div>
     </div>
-    <div style="flex:1;display:flex;flex-direction:column;min-height:0;position:relative">
-      <textarea id="notesArea" placeholder="Write down notes, markdown documentation, or links..." style="flex:1;resize:none;font-family:var(--vscode-font-family,sans-serif);font-size:12px;line-height:1.5;padding:8px;border-radius:5px;background:var(--ev-card);color:var(--vscode-foreground);border:1px solid var(--ev-border)" oninput="onNotesInput()"></textarea>
-      <div id="notesPreview" class="markdown-body" style="display:none;flex:1;overflow-y:auto;padding:8px;border:1px solid var(--ev-border);border-radius:5px;background:var(--ev-card);font-size:12px;line-height:1.5"></div>
-    </div>
-    <div id="notesStatus" style="font-size:10px;color:var(--ev-muted);margin-top:4px;text-align:right">All changes saved automatically</div>
   </div>
 
   <!-- Copy bar (vars only) -->
   <div class="copy-bar" id="copyBar">
-    <button class="copy-btn copy-export" onclick="copyAll('export')">${SVG.copy} Copy as export</button>
-    <button class="copy-btn copy-env"    onclick="copyAll('env')">${SVG.file} Copy as .env</button>
+    <button class="copy-btn copy-export" data-act="copyAll" data-args='["export"]'>${SVG.copy} Copy as export</button>
+    <button class="copy-btn copy-env"    data-act="copyAll" data-args='["env"]'>${SVG.file} Copy as .env</button>
   </div>
 </div>
 
@@ -151,8 +160,8 @@
       <span class="preview-pill" id="pillPrev">env</span>
     </div>
     <div class="form-btns">
-      <button class="btn btn-ghost" onclick="close_('envModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveEnvModal()">Save</button>
+      <button class="btn btn-ghost" data-act="close_" data-args='["envModal"]'>Cancel</button>
+      <button class="btn btn-primary" data-act="saveEnvModal">Save</button>
     </div>
   </div>
 </div>
@@ -167,8 +176,8 @@
       <input type="text" class="ml" id="projName" placeholder="e.g. my-api, rfi-builder…" autocomplete="off"/>
     </div>
     <div class="form-btns">
-      <button class="btn btn-ghost" onclick="close_('projModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveProjModal()">Save</button>
+      <button class="btn btn-ghost" data-act="close_" data-args='["projModal"]'>Cancel</button>
+      <button class="btn btn-primary" data-act="saveProjModal">Save</button>
     </div>
   </div>
 </div>
@@ -196,8 +205,8 @@
       </div>
     </div>
     <div class="form-btns">
-      <button class="btn btn-ghost" onclick="close_('stageModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveStageModal()">Save</button>
+      <button class="btn btn-ghost" data-act="close_" data-args='["stageModal"]'>Cancel</button>
+      <button class="btn btn-primary" data-act="saveStageModal">Save</button>
     </div>
   </div>
 </div>
@@ -216,8 +225,8 @@
       <textarea class="ml" id="cmdText" placeholder="npm run mock&#10;docker-compose up -d" spellcheck="false"></textarea>
     </div>
     <div class="form-btns">
-      <button class="btn btn-ghost" onclick="close_('cmdModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveCmdModal()">Save</button>
+      <button class="btn btn-ghost" data-act="close_" data-args='["cmdModal"]'>Cancel</button>
+      <button class="btn btn-primary" data-act="saveCmdModal">Save</button>
     </div>
   </div>
 </div>
@@ -230,13 +239,14 @@
     <div class="confirm-msg" id="confMsg"></div>
     <div class="confirm-sub" id="confSub"></div>
     <div class="form-btns">
-      <button class="btn btn-ghost" onclick="close_('confModal')">Cancel</button>
-      <button class="btn btn-danger" onclick="doConfirm()">Delete</button>
+      <button class="btn btn-ghost" data-act="close_" data-args='["confModal"]'>Cancel</button>
+      <button class="btn btn-danger" data-act="doConfirm">Delete</button>
     </div>
   </div>
 </div>
 
-<script>
+<script nonce="__NONCE__">
+/*PLACEHOLDER_DATA*/
 /*PLACEHOLDER_JS*/
 </script>
 </body>

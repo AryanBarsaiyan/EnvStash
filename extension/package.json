@@ -53,7 +53,26 @@
         "command": "envstash.importAll",
         "title": "EnvStash: Import Data"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "EnvStash",
+      "properties": {
+        "envstash.clipboardClearSeconds": {
+          "type": "number",
+          "default": 30,
+          "minimum": 0,
+          "maximum": 3600,
+          "description": "Seconds after which a copied variable value is cleared from the clipboard. Set to 0 to never clear it."
+        },
+        "envstash.autoHideSeconds": {
+          "type": "number",
+          "default": 30,
+          "minimum": 0,
+          "maximum": 3600,
+          "description": "Seconds after which revealed variable values are hidden again. Set to 0 to keep them visible. Takes effect when the EnvStash panel is reloaded."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

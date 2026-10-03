@@ -2,6 +2,22 @@
 
 All notable changes to the **EnvStash** extension will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **Encrypted backups**: exports can be protected with a passphrase (scrypt + AES-256-GCM). Existing plain JSON backups still import.
+- Copied variable values are **cleared from the clipboard** after `envstash.clipboardClearSeconds` (default 30).
+- Revealed variable values **hide themselves** after `envstash.autoHideSeconds` (default 30) and whenever the panel is hidden.
+- Redesigned **Notes** tab: icon toolbar, checklists, quotes, numbered and nested lists, word count.
+
+### Security
+- The webview now runs under a strict **Content Security Policy**; inline event handlers were replaced with delegated listeners.
+- Project, environment and variable names are no longer embedded in inline scripts, and environment colours are validated.
+
+### Fixed
+- Storage requests from the panel are processed one at a time, so a read can no longer overtake the save before it.
+- Notes typed just before leaving an environment or switching tabs are no longer dropped.
+
 ## [1.1.1] - 2026-07-03
 
 ### Added
