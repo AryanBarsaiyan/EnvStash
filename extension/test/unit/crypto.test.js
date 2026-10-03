@@ -1,9 +1,8 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { createHost } = require('../helpers/host');
 
-const { encryptBundle, decryptBundle } = createHost().ext;
+const { encryptBundle, decryptBundle } = require('../../out/services/backupCrypto');
 const PASS = 'correct horse battery';
 const flip = b64 => { const b = Buffer.from(b64, 'base64'); b[0] ^= 1; return b.toString('base64'); };
 

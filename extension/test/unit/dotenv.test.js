@@ -1,9 +1,8 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { createHost } = require('../helpers/host');
 
-const { parseDotenv } = createHost().ext;
+const { parseDotenv } = require('../../out/services/dotenv');
 const parse = text => Object.fromEntries(parseDotenv(text).map(v => [v.key, v.value]));
 
 test('parses plain KEY=value lines', () => {

@@ -11,7 +11,8 @@ function loadExtension(vscode) {
   Module._load = (request, ...rest) => request === 'vscode' ? vscode : original(request, ...rest);
   try {
     // a fresh copy per host, so module-level state never leaks between tests
-    delete require.cache[require.resolve(EXT)];
+    const out = path.join(ROOT, 'out') + path.sep;
+    for (const file of Object.keys(require.cache)) if (file.startsWith(out)) delete require.cache[file];
     return require(EXT);
   } finally {
     Module._load = original;
@@ -137,7 +138,7 @@ function createHost(options = {}) {
   /** Delivers without waiting: for tests about ordering. */
   host.sendNoWait = message => { listener(message); };
   /** Resolves when everything queued so far has been handled. */
-  host.settle = async () => { for (let i = 0; i < 3; i++) { await sleep(0); await host.provider._queue; } };
+  host.settle = async () => { for (let i = 0; i < 3; i++) { await sleep(0); await host.provider.queue.idle(); } };
 
   host.command = (id, ...args) => vscode.commands.registered[id](...args);
   host.index = () => JSON.parse(host.globalState.get('envstash_index') || '{"projects":[]}');

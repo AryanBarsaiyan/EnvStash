@@ -1,9 +1,8 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { createHost } = require('../helpers/host');
 
-const { detectShell } = createHost().ext;
+const { detectShell } = require('../../out/services/shell');
 const byName = name => detectShell({ name, creationOptions: {} });
 const byPath = shellPath => detectShell({ name: 'Terminal', creationOptions: { shellPath } });
 

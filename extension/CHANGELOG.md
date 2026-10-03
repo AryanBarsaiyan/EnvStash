@@ -8,6 +8,7 @@ All notable changes to the **EnvStash** extension will be documented in this fil
 - **Encrypted backups**: exports can be protected with a passphrase (scrypt + AES-256-GCM). Existing plain JSON backups still import.
 - Copied variable values are **cleared from the clipboard** after `envstash.clipboardClearSeconds` (default 30).
 - Revealed variable values **hide themselves** after `envstash.autoHideSeconds` (default 30) and whenever the panel is hidden.
+- **Reorder commands inside a runbook stage** by dragging the handle on each command.
 - Redesigned **Notes** tab: icon toolbar, checklists, quotes, numbered and nested lists, word count.
 
 ### Security
@@ -18,6 +19,10 @@ All notable changes to the **EnvStash** extension will be documented in this fil
 - Storage requests from the panel are processed one at a time, so a read can no longer overtake the save before it.
 - Notes typed just before leaving an environment or switching tabs are no longer dropped.
 - Shell detection no longer mistakes the extension's own "EnvStash" terminal (or any name containing "sh") for a POSIX shell, which made `export-env` emit `export …` in PowerShell on Windows.
+
+### Refactored
+- Split the single `extension.ts` into layers: storage (`VaultStore`), services (projects, environment data, backup, terminal, clipboard), a backup controller for the export/import dialogs, and a webview layer with one handler per message type. Shell-specific command syntax is now a strategy per shell.
+- Split `webview/script.js` into ordered files under `webview/js/`.
 
 ### Tests
 - Added a unit and feature test suite (`npm test`) covering the `.env` parser, backup encryption, shell detection, the Markdown renderer, every host message, and the panel UI driven through jsdom.

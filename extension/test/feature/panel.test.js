@@ -517,6 +517,114 @@ describe('runbook tab', () => {
     assert.deepEqual(panel.$$('.stage-num').map(el => el.textContent), ['1', '2', '3']);
   });
 
+  describe('reordering commands inside a stage', () => {
+    async function withCommands(t, labels = ['one', 'two', 'three']) {
+      const ctx = await withStage(t);
+      for (const label of labels) await addCommand(ctx.panel, label, `echo ${label}`);
+      return ctx;
+    }
+    const row = (panel, i, stage = 0) => panel.$$('.stage-card')[stage].querySelectorAll('.cmd-row')[i];
+    const handle = (panel, i, stage = 0) => row(panel, i, stage).querySelector('.cmd-handle');
+    const shown = panel => panel.$$('.cmd-label').map(el => el.textContent);
+    const stored = ({ host, ids }, stage = 0) => host.runbook(ids.projectId, ids.envId).stages[stage].commands.map(c => c.label);
+    // jsdom has no layout, so a drop always counts as the lower half: "insert after the target"
+    async function drag(panel, from, to, { fromStage = 0, toStage = 0 } = {}) {
+      await panel.fire(handle(panel, from, fromStage), 'dragstart');
+      const over = await panel.fire(row(panel, to, toStage), 'dragover', { clientY: 0 });
+      await panel.fire(row(panel, to, toStage), 'drop', { clientY: 0 });
+      return over;
+    }
+
+    test('dragging a command by its handle moves it and saves the new order', async t => {
+      const ctx = await withCommands(t);
+      const over = await drag(ctx.panel, 0, 2);
+      assert.ok(over.defaultPrevented, 'dragover must be cancelled or the browser refuses the drop');
+      assert.deepEqual(shown(ctx.panel), ['two', 'three', 'one']);
+      assert.deepEqual(stored(ctx), ['two', 'three', 'one']);
+    });
+
+    test('moving a command up works too', async t => {
+      const ctx = await withCommands(t);
+      await drag(ctx.panel, 2, 0);
+      assert.deepEqual(stored(ctx), ['one', 'three', 'two']);
+    });
+
+    test('the buttons act on the command now in that position', async t => {
+      const ctx = await withCommands(t);
+      const term = ctx.host.useTerminal('bash');
+      await drag(ctx.panel, 0, 2);
+      await ctx.panel.click(row(ctx.panel, 0).querySelector('.c-btn.run'));
+      assert.deepEqual(term.sent, ['echo two']);
+      await ctx.panel.click('#rbBar .btn-primary');
+      assert.equal(term.sent[1], 'echo two && echo three && echo one');
+    });
+
+    test('dropping a command on itself changes nothing and saves nothing', async t => {
+      const ctx = await withCommands(t);
+      const before = JSON.stringify(ctx.host.runbook(ctx.ids.projectId, ctx.ids.envId));
+      const writes = () => [...ctx.host.secrets.entries()].length + ctx.host.posted.length;
+      const count = writes();
+      await drag(ctx.panel, 1, 1);
+      assert.equal(JSON.stringify(ctx.host.runbook(ctx.ids.projectId, ctx.ids.envId)), before);
+      assert.equal(writes(), count);
+    });
+
+    test('a command cannot be dropped into a different stage', async t => {
+      const ctx = await withCommands(t, ['a1', 'a2']);
+      await ctx.panel.click(ctx.panel.$$('#rbList .dashed-btn').at(-1));
+      await ctx.panel.type('#stageName', 'Second');
+      await ctx.panel.click('#stageModal .btn-primary');
+      await addCommand(ctx.panel, 'b1', 'echo b1', 1);
+      await addCommand(ctx.panel, 'b2', 'echo b2', 1);
+
+      const over = await drag(ctx.panel, 0, 1, { toStage: 1 });
+      assert.ok(!over.defaultPrevented, 'the browser is told this is not a drop target');
+      assert.deepEqual(stored(ctx, 0), ['a1', 'a2']);
+      assert.deepEqual(stored(ctx, 1), ['b1', 'b2']);
+    });
+
+    test('only the handle starts a drag, and a single command has no handle', async t => {
+      const ctx = await withCommands(t, ['only']);
+      assert.equal(ctx.panel.$('.cmd-handle'), null);
+
+      await addCommand(ctx.panel, 'second', 'echo second');
+      assert.equal(ctx.panel.$$('.cmd-handle').length, 2);
+      assert.ok(!row(ctx.panel, 0).hasAttribute('draggable'), 'the row itself stays selectable text');
+      // a drag that did not start on a handle must not be picked up as a command move
+      await ctx.panel.fire(row(ctx.panel, 0).querySelector('.cmd-code'), 'dragstart');
+      await ctx.panel.fire(row(ctx.panel, 1), 'drop', { clientY: 0 });
+      assert.deepEqual(stored(ctx), ['only', 'second']);
+    });
+
+    test('dragging a command over a stage header does not move stages', async t => {
+      const ctx = await withCommands(t, ['a1', 'a2']);
+      await ctx.panel.click(ctx.panel.$$('#rbList .dashed-btn').at(-1));
+      await ctx.panel.type('#stageName', 'Second');
+      await ctx.panel.click('#stageModal .btn-primary');
+
+      await ctx.panel.fire(handle(ctx.panel, 0), 'dragstart');
+      await ctx.panel.fire(ctx.panel.$$('.stage-hd')[1], 'drop', { clientY: 0 });
+      assert.deepEqual(ctx.panel.$$('.stage-name').map(el => el.textContent), ['Start', 'Second']);
+    });
+
+    test('a finished stage move does not linger and hijack the next drag', async t => {
+      const ctx = await withCommands(t, ['a1', 'a2']);
+      await ctx.panel.click(ctx.panel.$$('#rbList .dashed-btn').at(-1));
+      await ctx.panel.type('#stageName', 'Second');
+      await ctx.panel.click('#stageModal .btn-primary');
+      const names = () => ctx.host.runbook(ctx.ids.projectId, ctx.ids.envId).stages.map(s => s.name);
+
+      // move stage 0 after stage 1; the re-render detaches the dragged header, so no dragend arrives
+      await ctx.panel.fire(ctx.panel.$$('.stage-hd')[0], 'dragstart');
+      await ctx.panel.fire(ctx.panel.$$('.stage-hd')[1], 'drop', { clientY: 0 });
+      assert.deepEqual(names(), ['Second', 'Start']);
+
+      // a later, unrelated drop on a header must not move a stage again
+      await ctx.panel.fire(ctx.panel.$$('.stage-hd')[1], 'drop', { clientY: 0 });
+      assert.deepEqual(names(), ['Second', 'Start']);
+    });
+  });
+
   test('dropping a stage on itself changes nothing', async t => {
     const { panel, host, ids } = await withStage(t, 'Only');
     const before = host.posted.length;

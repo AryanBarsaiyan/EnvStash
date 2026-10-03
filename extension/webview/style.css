@@ -781,3 +781,21 @@ textarea.ml{min-height:80px;resize:vertical;font-family:var(--vscode-editor-font
   padding: 32px 12px;
 }
 .empty-notes b { color: var(--vscode-foreground); font-size: 12px; }
+
+/* ── Command reordering ── */
+.cmd-row { position: relative; }
+.cmd-handle { margin-top: 2px; flex-shrink: 0; cursor: grab; opacity: 0.45; transition: opacity 0.1s; }
+.cmd-row:hover .cmd-handle { opacity: 1; }
+.cmd-row.dragging { opacity: 0.4; }
+.cmd-row.drag-over-top::before,
+.cmd-row.drag-over-bottom::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--ev-accent);
+  z-index: 10;
+}
+.cmd-row.drag-over-top::before { top: -1px; }
+.cmd-row.drag-over-bottom::after { bottom: -1px; }
